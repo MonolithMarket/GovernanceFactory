@@ -1,342 +1,359 @@
-# Monolith CoinDAO Factory
+# OSS-First Monolith CoinDAO Plan
 
-# **1\. Executive summary**
+## 1. Executive summary
 
-The CoinDAO Factory is an optional layer for Monolith deployers. It lets a deployer launch a per-stablecoin governance token, treasury, revenue-share staking system, and stablecoin-demand incentives around a Monolith coin. The goal is to give teams and communities a real upside/co-ordination layer without changing the core Monolith lending design.
+The CoinDAO Factory is an optional layer for Monolith deployers. It lets a deployer launch a per-stablecoin governance and incentive system around a Monolith coin without changing the core Monolith lending design.
 
-* Optional per-stablecoin system: deployers can launch a plain Monolith coin or opt into a CoinDAO.  
-* GovToken is fixed supply in v1; no post-deployment minting.  
-* CoinStakingRewards is core/default: naked Coin stakers earn GovToken emissions from launch.  
-* GovToken staking is core/default: GovToken stakers receive streamed Coin revenue and govern through non-transferable, delegation-enabled stGOV.  
-* RevenueRouter is the Lender operator. It receives local reserves and routes them according to governance-set weights, with any unallocated remainder sent to the DAO Treasury.  
-* Governance has real powers: treasury control, revenue routing, operator actions, manager actions, incentive budgets, and manager delegation.  
-* The Lender manager defaults to the Timelock, but governance can delegate the manager role to a multisig for faster experimentation and can later replace it again.  
-* Team allocation is optional, capped at 20%, and vested over 4 years with a 1-year cliff.  
-* DAO Treasury allocation vests over time; a small immediate launch budget is available on day 0\.  
-* Monolith receives a fixed 2% allocation, vesting over 2 years.  
-* A temporary cancel guardian exists for the first 12 months, that can cancel itself earlier if desired.
+The design rule for v1 is strict:
 
-# **2\. Product and business decisions**
+- Use battle-tested open-source contracts unmodified wherever possible.
+- Prefer OpenZeppelin Contracts 5.x for tokens, governance, timelock, and vesting.
+- Prefer the Synthetix staking rewards pattern for reward streaming.
+- Requirements that cannot be implemented through established contracts or small integration glue are excluded from v1.
+- Small project contracts are acceptable only for inheritance glue, Monolith integration, or behavior that is core to the product.
 
-## **2.1 Launch model**
+The accepted bespoke core contracts are:
 
-* Each opted-in Monolith stablecoin receives its own GovToken and CoinDAO.  
-* The system is not forced. Deployers can still launch without a gov token.  
-* Factory-launched CoinDAOs receive first-class UI support and standard disclosures.  
-* The design is intentionally opinionated: enough standardization to make launches credible, not so much rigidity that serious teams avoid using it.
+| Contract | Why it exists |
+| :-- | :-- |
+| `stGovToken` | Combines wrapped GovToken staking, non-transferable voting power, delegation, and reward streaming in one receipt token. It should be composed from OpenZeppelin token/votes/wrapper modules plus Synthetix-style reward accounting. |
+| `RevenueRouter` | Monolith-specific Lender operator that splits collected Coin revenue only between the Timelock treasury and `stGovToken`. |
+| Governor guardian expiry wrapper | Tiny extension around OpenZeppelin `GovernorProposalGuardian` so guardian cancel permission automatically expires after a deadline. |
 
-## **2.2 Allocation templates**
+Everything else should be a direct use of established contracts or a minimal concrete wrapper around an abstract OpenZeppelin module.
 
-There is no airdrop/points bucket in the default design. The primary community distribution mechanism is CoinStakingRewards: users stake the naked Monolith Coin and earn GovToken emissions.
+## 2. Product model
+
+### 2.1 Launch model
+
+- Each opted-in Monolith stablecoin receives its own CoinDAO stack.
+- Deployers can still launch a plain Monolith coin without a CoinDAO.
+- Factory-launched CoinDAOs receive first-class UI support and standardized disclosures.
+- GovToken supply is fixed at deployment; no post-deployment minting in v1.
+- Treasury assets are held directly by the Timelock, not by a separate treasury contract.
+
+### 2.2 Allocation templates
+
+There is no airdrop or points bucket in the baseline product. The primary community distribution mechanism is Coin staking: users stake the naked Monolith Coin and earn GovToken rewards from a prefunded rewards contract.
 
 | Bucket | Fair launch | Standard launch | Team-led launch | Notes |
-| :---- | :---- | :---- | :---- | :---- |
-| CoinStakingRewards emissions reserve | 68% | 53% | 48% | Funds naked Coin staking rewards. Funded at launch and emitted by the selected preset schedule; active emissions pause while no Coin is staked. |
-| DAO Treasury \- vested | 25% | 25% | 25% | 4-year linear vest, no cliff. Long-term DAO budget. |
-| DAO immediate launch budget | 5% | 5% | 5% | Liquid on day 0\. Used for launch liquidity, market-making inventory, initial incentives, or urgent bootstrapping. |
-| Team/deployer vesting | 0% | 15% | 20% max | 4-year vest with 1-year cliff. No liquid team allocation at launch. |
-| Monolith allocation | 2% | 2% | 2% | Fixed for official factory launches. 2-year linear vest, no cliff. |
+| :-- | --: | --: | --: | :-- |
+| Coin staking rewards reserve | 68% | 53% | 48% | Funds naked Coin staking rewards. |
+| Timelock treasury vested | 25% | 25% | 25% | 4-year linear vest to the Timelock. |
+| Timelock immediate launch budget | 5% | 5% | 5% | Liquid on day 0 and held by the Timelock. |
+| Team/deployer vesting | 0% | 15% | 20% max | 4-year vest with 1-year cliff. |
+| Monolith allocation | 2% | 2% | 2% | 2-year linear vest. |
 
-The DAO Treasury total is therefore 30%, split between a vested long-term treasury allocation and a 5% immediate launch budget. The 5% immediate budget is still a DAO-controlled allocation; it is separated only because it is available at launch rather than vested.
+The Timelock treasury total is therefore 30%, split between a 25% vested allocation and a 5% immediate launch budget.
 
-## **2.3 CoinStakingRewards is mandatory in v1**
+### 2.3 GovToken and stGovToken
 
-* Users stake the naked Monolith Coin, not the sToken.  
-* Stakers earn GovToken emissions from the CoinStakingRewards emissions reserve.  
-* Emissions start immediately at first deposit to CoinStakingRewards at a defined rate according to the selected emission schedule.  
-* This is the main bootstrap mechanism for stablecoin demand: users need to acquire or mint the Coin to farm GovToken.  
-* External LP/bribe/partner incentives are not hardcoded in v1. They are funded through the DAO Treasury or delegated budgets.
+`GovToken` is the transferable economic token. It has no voting rights and no direct revenue share.
 
-## **2.4 What if no Coin is staked?**
+`stGovToken` is the staked/wrapped governance token:
 
-CoinStakingRewards should not use notifyRewardAmount-style arbitrary top-ups for the core emissions schedule. That pattern belongs to GovTokenStaking revenue streaming.
+- Users deposit `GovToken` and receive `stGovToken` 1:1.
+- Users burn `stGovToken` and withdraw the underlying `GovToken` 1:1.
+- `stGovToken` is non-transferable except minting on stake and burning on unstake.
+- `stGovToken` implements OpenZeppelin-style vote checkpoints and vote delegation.
+- The Governor reads voting power from `stGovToken`, not from `GovToken`.
+- `stGovToken` receives streamed reward tokens, including Monolith Coin revenue from `RevenueRouter`.
+- Unstaked `GovToken` has no voting power and earns no revenue.
 
-For CoinStakingRewards, the GovToken allocation is funded at launch and emitted according to the selected preset schedule: either linear 4-year emissions or the predefined modest bootstrap curve.
+This makes the user's staked position the same position used for governance and revenue share.
 
-The emissions schedule should be treated as an active-emission schedule, not a mechanism that blindly awards tokens when nobody is staking. If total Coin staked is zero, no user accrues rewards and the active-emission clock should pause.
+### 2.4 Coin staking rewards
 
-When total Coin staked becomes non-zero again, the active-emission clock resumes and rewards accrue from that point forward at the scheduled rate. This prevents emissions from being wasted and prevents the first staker from capturing rewards for time when nobody was staking.
+Coin staking uses an existing Synthetix-style staking rewards contract.
 
-Unused emissions remain in the CoinStakingRewards reserve. They are not burned, awarded to nobody, or instantly handed to the next staker.
+- Users stake the naked Monolith Coin, not the sToken.
+- Stakers earn GovToken rewards from the launch-funded rewards reserve.
+- The rewards contract is prefunded at launch.
+- Reward duration and funding are handled through the imported rewards contract's standard behavior.
 
-Implementation detail: the rewards contract or EmissionScheduler should update rewardPerToken only for elapsed time during which totalStaked \> 0\. A public checkpoint/poke function is fine, but it should only apply the preset schedule; it should not be an arbitrary admin-controlled reward notification flow.
+The v1 Coin staking contract does not include:
 
-## **2.5 CoinStakingRewards emission curve**
+- custom active-emission clocks,
+- no-staker pause semantics,
+- bespoke bootstrap curves.
 
-At deployment, the deployer should choose one of two standard emission curves. Custom curves should not be part of v1.
+Reward timing follows the selected staking rewards implementation. The CoinDAO contracts do not add a separate emission scheduler.
 
-The selected curve is fixed at launch and should be clearly visible in the UI. Governance can still fund additional campaigns from the DAO Treasury, but the default CoinStakingRewards allocation should follow the chosen preset schedule.
+## 3. Open-source contract mapping
 
-The bootstrap curve is intentionally modest rather than aggressive: year 1 is 1.4x the linear schedule, not a large cliff-style front-load.
+| Need | Preferred implementation | Notes |
+| :-- | :-- | :-- |
+| Fixed-supply token | OpenZeppelin `ERC20` / `ERC20Permit` concrete token | Mint full supply once in constructor or deployment flow, then no minter role. |
+| Staked voting/revenue token | Project `stGovToken` composed from OpenZeppelin `ERC20Wrapper`, `ERC20Votes`, optional `ERC20Permit`, and Synthetix-style rewards | Core bespoke primitive. Do not fork OpenZeppelin. |
+| Governor | OpenZeppelin Governor modules | Use `GovernorSettings`, `GovernorCountingSimple`, `GovernorVotes`, `GovernorVotesQuorumFraction`, `GovernorTimelockControl`, and `GovernorProposalGuardian`. |
+| Timelock and treasury | OpenZeppelin `TimelockController` | The Timelock directly holds funds and executes arbitrary calls. |
+| Cancel guardian expiry | Tiny Governor wrapper | Guardian cancel power is valid only while `block.timestamp < guardianExpiresAt`. |
+| Coin staking rewards | Synthetix-style `StakingRewards` | Use without custom emission scheduling. |
+| Team vesting | OpenZeppelin `VestingWalletCliff` via concrete wrapper | 4-year duration, 1-year cliff. |
+| DAO and Monolith vesting | OpenZeppelin `VestingWallet` | Linear vesting. |
+| Revenue routing | Project `RevenueRouter` | Minimal Monolith-specific splitter. |
 
-Rates are constant within each emission year/epoch. If no Coin is staked, the active-emission clock pauses; when staking resumes, the schedule continues from the same active-emission point rather than skipping ahead.
+## 4. Governance model
 
-| Option | Year 1 | Year 2 | Year 3 | Year 4 | Notes |
-| :---- | :---- | :---- | :---- | :---- | :---- |
-| Linear 4-year | 25% | 25% | 25% | 25% | Simple and neutral default. Same emission rate throughout. |
-| Modest bootstrap curve | 35% | 30% | 22.5% | 12.5% | Front-loads demand bootstrapping without extreme early inflation. Constant rate within each year. |
+### 4.1 Voting asset
 
-## **2.6 GovToken staking and revenue share**
+Governance uses active `stGovToken` voting power.
 
-* Users stake GovToken into GovTokenStaking and receive stGOV.  
-* stGOV is non-transferable in v1. Transfers are disabled except mint on stake and burn on unstake/cooldown.  
-* stGOV represents governance voting power, claim on streamed Coin revenue, and withdrawal claim on underlying GovToken.  
-* stGOV supports vote delegation. A staker can delegate voting power to themselves, a team multisig, a public delegate, or any other address.  
-* Non-transferability keeps unclaimed reward accounting simple: rewards stay with the staking account and there is no secondary-market ambiguity around accrued but unclaimed revenue.  
-* Users should not have to choose between revenue and governance. The staked position is the governance position.
+- `GovToken` balances do not vote.
+- `stGovToken` balances vote only after delegation, following OpenZeppelin `ERC20Votes` behavior.
+- Proposal thresholds, quorum, and vote weights use historical checkpoints.
+- Burning `stGovToken` to unstake removes future voting power according to the checkpointing rules.
 
-## **2.7 GovToken staking withdrawal delay**
+### 4.2 Governor stack
 
-GovTokenStaking should include a withdrawal cooldown to reduce temporary voting-power acquisition and fast-exit governance attacks. The default cooldown should be 14 days and governance should be able to change the cooldown for future withdrawals.
+Use OpenZeppelin Governor modules:
 
-* Default withdrawal cooldown: 14 days.  
-* Minimum withdrawal cooldown: 1 day.  
-* Maximum withdrawal cooldown: XX days.  
-* Governance can change the cooldown duration by normal proposal/timelock process. The new duration should apply to future cooldowns, not retroactively to existing cooldown positions.  
-* A separate escrow contract is not required. GovTokenStaking can internally track active stake, cooling-down balances, and withdrawn amounts. A separate WithdrawalEscrow is acceptable if devs prefer separation, but it is not conceptually necessary.  
-* When a user starts cooldown, their stGOV for that amount is burned or removed from active staking balance immediately.  
-* Cooling-down balances should not earn revenue and should not have governance voting power.  
-* Rewards accrued before cooldown starts should remain claimable by the user after checkpointing.  
-* Withdrawals should unlock linearly over the cooldown period, similar in spirit to stYFI: users can withdraw a proportional amount as time passes rather than waiting until the end for all-or-nothing liquidity.
+- `Governor`
+- `GovernorSettings`
+- `GovernorCountingSimple`
+- `GovernorVotes`
+- `GovernorVotesQuorumFraction`
+- `GovernorTimelockControl`
+- `GovernorProposalGuardian`
+- a tiny project wrapper for guardian expiry
 
-`availableToWithdraw = cooldownAmount * elapsed / cooldownDuration - alreadyWithdrawn`
+Default governance parameters:
 
-`elapsed = min(block.timestamp, cooldownEnd) - cooldownStart`
+| Parameter | Default |
+| :-- | :-- |
+| Voting delay | 1 day |
+| Voting period | 5 days |
+| Timelock delay | 2 days |
+| Initial quorum | 1% of `stGovToken` supply at snapshot |
+| Proposal threshold | Fixed at deployment |
+| Cancel guardian duration | 12 months from deployment |
 
-This reduces the economic punishment for users who want to exit while still preventing instant stake-vote-unstake behavior. If a user starts multiple cooldowns, the implementation can either store multiple cooldown lots or use a consolidated queue. The preferred behavior is not to reset an existing partially elapsed cooldown when a user starts cooling additional tokens.
+### 4.3 Cancel guardian expiry
 
-## **2.8 Team, DAO Treasury, and Monolith vesting**
+The cancel guardian is temporary. OpenZeppelin `GovernorProposalGuardian` provides the guardian mechanism, and the project Governor adds only expiry gating.
 
-* Team allocation: optional, capped at 20%, 4-year vest with 1-year cliff. The team has a real economic claim from launch but no liquid unlock on day 0\.  
-* Teams can accumulate liquid GovToken from day 0 by staking Coin into CoinStakingRewards like everyone else. As deployers, they are naturally advantaged in early farming because they are motivated to bootstrap the Coin.  
-* DAO Treasury vested allocation: 25%, 4-year linear vest, no cliff. There is no need for the full long-term treasury to be liquid on day 0\.  
-* DAO immediate launch budget: 5%, liquid from launch and controlled by the DAO/Treasury for initial liquidity, incentives, market-maker inventory, or urgent bootstrap needs.  
-* Monolith allocation: fixed 2%, 2-year linear vest, no cliff, to the Monolith/Inverse ecosystem treasury or designated vesting recipient.
+Required behavior:
 
-## **2.9 External incentives**
+- The configured guardian can cancel proposals before `guardianExpiresAt`.
+- At or after `guardianExpiresAt`, the guardian has no special cancellation permission.
+- No storage cleanup is required after expiry.
+- Governance can still set or clear the guardian through the standard OpenZeppelin governance-controlled setter, but the expiry check remains in force.
+- The UI must display `guardianExpiresAt` and whether guardian power is currently active.
 
-* Do not hardcode LP/bribe integrations in v1.  
-* The correct primitive is treasury control plus delegated budgets.  
-* Governance can transfer assets to an incentives multisig or budget vault.  
-* That delegated address can handle Curve bribes, LP incentives, partner integrations, merkle campaigns, market-maker arrangements, or any other external incentive strategy.  
-* Governance can top up, replace, or revoke the delegated budget manager.
+This requires a small override of the guardian cancellation validation path. It does not require modifying OpenZeppelin source.
 
-# **3\. Governance model**
+## 5. Timelock treasury
 
-## **3.1 Voting asset and delegation**
+There is no `CoinTreasury` contract in v1.
 
-* Governance should use active stGOV voting power.  
-* stGOV is non-transferable but delegation-enabled.  
-* Delegation should be standard and visible in the UI.  
-* Cooling-down GovToken should not count as voting power.  
-* Proposal thresholds and vote weights must use historical checkpoints, not current balances.
+The OpenZeppelin `TimelockController` is the treasury:
 
-* Allow “cancel guardian” to submit proposals despite not meeting proposal threshold.
-
-## **3.2 Standard governance cadence**
+- It holds the immediate treasury allocation.
+- It receives vested DAO treasury tokens.
+- It receives the treasury share of routed Monolith Coin revenue.
+- It owns or controls governance-managed contracts.
+- It executes arbitrary approved governance actions.
 
-| Parameter | Default | Notes |
-| :---- | :---- | :---- |
-| Voting delay | 1 day | Gives time between proposal creation and voting snapshot/start. |
-| Voting period | 5 days | Standard period for discussion and voting. |
-| Timelock delay | 2 days | Execution delay after a successful vote. |
-| Initial quorum | 0.5-1.0% of total supply or stGOV supply | Needs to be practical while circulation/delegation is low. Can be raised later. |
-| Proposal threshold | 0.1-0.25% | Low enough for early governance, high enough to reduce spam. |
-| Cancel guardian | 12 months | Temporary only. Cancels malicious/broken proposals; cannot execute anything. |
-
-## **3.3 Governance attack resistance**
-
-* A simple same-transaction flash-loan attack should not work if proposal threshold and voting power use checkpointed prior votes with a non-zero voting delay.  
-* The larger risk is temporary acquisition of voting power around the snapshot. The stGOV cooldown helps because users cannot instantly unstake and exit after using voting power.  
-* Cooling-down balances have no votes and earn no revenue.  
-* The 12-month cancel guardian adds early protection during the most fragile distribution period.  
-* These controls do not make governance impossible to attack, but they materially reduce cheap stake-vote-exit behavior.
-
-## **3.4 Temporary cancel guardian**
-
-* Default duration: 12 months from CoinDAO deployment.  
-* Guardian can cancel malicious, obviously broken, compromised, or governance-attack proposals.  
-* Guardian cannot execute proposals, spend funds, change parameters, route revenue, or bypass governance.  
-* Guardian expires automatically and must be displayed in the UI.  
-* If the team wants a shorter guardian period, this can be configurable at deployment, but the default should be 12 months.
-
-## **3.5 Treasury control**
-
-* Treasury control should be Compound-style arbitrary execution, not a fixed list of approved treasury functions.  
-* The CoinDAO needs to fund incentives, seed liquidity, interact with external protocols, pay grants, deploy helper contracts, and manage budgets without new hardcoded modules each time.  
-* Timelock is the effective controller of treasury assets.  
-* Treasury can be the Timelock itself or a separate CoinTreasury contract controlled by Timelock.  
-* If separate, CoinTreasury should expose execute(target, value, data) callable only by Timelock.
-
-# **4\. Revenue collection, routing, and streaming**
-
-## **4.1 Lender reserve behavior**
-
-* In the current Lender, pullLocalReserves() is permissionless.  
-* Calling pullLocalReserves() accrues interest/PSM profit and mints accrued local reserves to the Lender operator.  
-* Governance does not need to control who triggers reserve collection. Governance needs to control the operator address that receives the reserves and the module that routes them.
-
-## **4.2 RevenueRouter role**
-
-* RevenueRouter should be the Lender operator.  
-* Anyone can call Lender.pullLocalReserves(), which mints Coin revenue to RevenueRouter.  
-* RevenueRouter routes received Coin according to governance-set recipient weights.  
-* Recipients can include DAO Treasury, GovTokenStaking, buyback contracts, incentive budget vaults, external reward contracts, or any other address approved by governance.  
-* RevenueRouter must expose the full operator and operator-or-manager surface to governance, including setManager().
-
-`Borrower interest / PSM profit`  
-    `-> Lender local reserves`  
-    `-> pullLocalReserves() [permissionless]`  
-    `-> RevenueRouter as operator`  
-    `-> governance-defined routing`
-
-## **4.3 Revenue routing weights**
-
-Active recipient weights do not need to sum to exactly 100%. This makes adding, removing, and updating recipients simpler.
-
-* Each recipient has a weight in bps.  
-* sum(activeWeights) must be \<= 10,000 bps.  
-* If sum(activeWeights) \< 10,000 bps, the unallocated remainder is sent to the DAO Treasury.  
-* If sum(activeWeights) \== 0, all revenue goes to the DAO Treasury.  
-* If sum(activeWeights) \> 10,000 bps, the update reverts.  
-* This gives governance flexibility while ensuring revenue never gets stuck due to incomplete routing configuration.
-
-`routedAmount = revenue * recipientWeightBps / 10_000`  
-`residual = revenue - sum(routedAmounts)`  
-`transfer residual to DAO Treasury`
-
-## **4.4 GovTokenStaking revenue streaming**
-
-GovTokenStaking should use a standard Synthetix-style reward streaming model. This matches the desired behavior: when new revenue is notified, the new amount plus any unstreamed remainder from the current stream is streamed over a fresh duration.
-
-* Default rewardDuration: 14 days.  
-* Governance can change rewardDuration for future streams by normal proposal/timelock process.  
-* When RevenueRouter routes Coin to GovTokenStaking, it calls notifyRewardAmount(amount).  
-* If the previous stream has finished, rewardRate \= amount / rewardDuration.  
-* If the previous stream is still active, remaining \= (periodFinish \- now) \* rewardRate; new rewardRate \= (amount \+ remaining) / rewardDuration; periodFinish \= now \+ rewardDuration.  
-* If revenue is collected again shortly after, the same calculation runs again. The unstreamed remainder is rolled into the next stream.  
-* If revenue is collected at least once every y duration where y \< rewardDuration, stGOV holders will experience continuous revenue streaming.
-
-`if block.timestamp >= periodFinish:`  
-    `rewardRate = newReward / rewardDuration`  
-`else:`  
-    `remaining = (periodFinish - block.timestamp) * rewardRate`  
-    `rewardRate = (newReward + remaining) / rewardDuration`  
-`periodFinish = block.timestamp + rewardDuration`
-
-## **4.5 What happens when a staker claims revenue?**
-
-* GovTokenStaking maintains rewardPerToken accounting.  
-* Each account tracks userRewardPerTokenPaid and rewards\[account\].  
-* When a user claims, the contract updates global rewardPerToken, updates the user's accrued reward, transfers accrued Coin to that user, and resets their accrued balance to zero.  
-* If another user claims immediately after, they receive only their own accrued amount based on their active stGOV and time-weighted share.  
-* One user claiming does not reduce another user's accounting entitlement.  
-* New revenue distributions affect future streaming from the notification timestamp onward. They do not retroactively change rewards already accrued by stakers.
-
-# **5\. Technical architecture**
-
-## **5.1 Contract set**
-
-| Contract | Purpose |
-| :---- | :---- |
-| CoinDAOFactory | Deploys the optional CoinDAO stack for a Monolith coin. |
-| GovToken | Fixed-supply governance token. No post-deployment minting in v1. |
-| Governor | Proposal, voting, quorum, and execution interface. Uses stGOV checkpoints. |
-| Timelock | Executes successful governance actions after delay. Controls treasury and RevenueRouter. |
-| CoinTreasury | DAO treasury. Either holds assets directly or is controlled by Timelock. Supports arbitrary execution. |
-| RevenueRouter | Lender operator. Receives local reserves, routes revenue, and exposes operator/operator-or-manager wrappers. |
-| CoinStakingRewards | Naked Coin staking contract. Distributes GovToken emissions from launch. |
-| EmissionScheduler / rewards reserve | Implements selected preset 4-year linear or modest bootstrap emission curve. Tracks active-emission time so no-staker periods do not waste emissions or reward the first staker retroactively. |
-| GovTokenStaking / stGOV | GovToken staking, revenue streaming, voting power, delegation, and withdrawal cooldown. |
-| TeamVesting | Optional team allocation. 4-year vest, 1-year cliff. |
-| TreasuryVesting | DAO vested treasury allocation. 4-year linear vest, no cliff. |
-| MonolithVesting | Fixed 2% Monolith allocation. 2-year linear vest, no cliff. |
-
-## **5.2 Recommended role wiring**
-
-| Role / control surface | Default holder | Notes |
-| :---- | :---- | :---- |
-| Lender operator | RevenueRouter | Receives local reserves and exposes operator wrappers. |
-| Lender manager | Timelock | Governance can later delegate manager to a multisig and replace it again. |
-| RevenueRouter owner/controller | Timelock | Only governance can change routing or call operator wrappers. |
-| CoinTreasury controller | Timelock | Compound-style arbitrary execution. |
-| GovTokenStaking admin | Timelock | Can change rewardDuration and withdrawal cooldown for future periods. |
-| CoinStakingRewards admin | Timelock / EmissionScheduler | Controls emission schedule according to selected factory template. |
-| Cancel guardian | Temporary guardian address | Cancel-only power, expires after 12 months. |
-
-## **5.3 RevenueRouter function surface**
-
-RevenueRouter should not be a narrow revenue-only contract. Because it is the Lender operator, it must expose every operator and operator-or-manager action that governance may need.
-
-`// Revenue routing`  
-`function distribute() external;`  
-`function setRevenueRecipientWeight(address recipient, uint16 weightBps) external onlyTimelock;`  
-`function removeRevenueRecipient(address recipient) external onlyTimelock;`  
-`function setDefaultTreasury(address treasury) external onlyTimelock;`
-
-`// Operator wrappers`  
-`function setLocalReserveFeeBps(uint feeBps) external onlyTimelock;`  
-`function setPendingOperator(address pendingOperator) external onlyTimelock;`  
-`function enableImmutabilityNow() external onlyTimelock;`
-
-`// Operator-or-manager wrappers`  
-`function setManager(address manager) external onlyTimelock;`  
-`function setHalfLife(uint64 halfLife) external onlyTimelock;`  
-`function setTargetFreeDebtRatio(uint16 startBps, uint16 endBps) external onlyTimelock;`  
-`function setRedeemFeeBps(uint16 redeemFeeBps) external onlyTimelock;`  
-`function setMaxBorrowDeltaBps(uint16 maxBorrowDeltaBps) external onlyTimelock;`
-
-# **6\. Deployment flow**
-
-1. Deployer creates a Monolith stablecoin as normal.  
-2. If opted in, CoinDAOFactory deploys GovToken, Governor, Timelock, RevenueRouter, CoinTreasury, CoinStakingRewards, EmissionScheduler/rewards reserve, GovTokenStaking/stGOV, TeamVesting if applicable, TreasuryVesting, and MonolithVesting.  
-3. GovToken supply is minted at genesis into the configured allocation contracts.  
-4. CoinStakingRewards is funded at launch and emissions follow the selected preset curve. Rewards accrue only while Coin is staked; no-staker periods pause the active-emission clock.  
-5. GovTokenStaking is deployed and ready to receive staked GovToken. Revenue begins once local reserves are collected and routed.  
-6. Lender.operator is set to RevenueRouter.  
-7. Lender.manager defaults to Timelock, unless governance later delegates manager to a multisig.  
-8. UI surfaces all roles, allocations, vesting, emission rates, revenue routing, staking cooldowns, governance settings, and guardian expiry.
-
-# **7\. UI and disclosure requirements**
-
-* GovToken address, total supply, allocation table, and all vesting schedules.  
-* CoinStakingRewards emission curve, active-emission time, current scheduled emission rate, remaining emissions reserve, and staking contract address.  
-* Behavior when no Coin is staked: no rewards accrue, the active-emission clock pauses, and unallocated emissions remain in the reserve.  
-* GovTokenStaking/stGOV address, rewardDuration, active rewardRate, unstreamed rewards, delegation status, withdrawal cooldown, and withdrawable amount.  
-* Team allocation, 4-year vest, 1-year cliff, and vesting recipient.  
-* DAO Treasury vested allocation and immediate launch budget.  
-* Fixed 2% Monolith allocation and 2-year vesting schedule.  
-* Governor, Timelock, voting delay, voting period, proposal threshold, quorum, timelock delay, and cancel guardian expiry.  
-* Lender operator and whether it is the standard RevenueRouter.  
-* Lender manager and whether it is Timelock or a delegated multisig.  
-* Current local reserve fee and revenue routing recipients/weights, including any residual routed to treasury.  
-* Queued proposals affecting treasury, revenue routing, operator, manager, parameters, immutability, rewardDuration, staking cooldown, or guardian settings.  
-* Immutability deadline and whether immutability has been enabled.
-
-# **8\. Recommended v1 scope**
-
-* Build the full CoinDAO stack, not just a token deployer.  
-* CoinStakingRewards and GovTokenStaking are both core/default modules.  
-* Use fixed GovToken supply with no post-deployment minting.  
-* Use the allocation templates in this document; no default airdrop/points bucket.  
-* Use either linear 4-year emissions or the predefined modest bootstrap curve, implemented as a preset schedule rather than arbitrary reward notifications.  
-* Do not lose emissions when no Coin is staked; pause the active-emission clock and keep unused emissions in the reserve.  
-* Treasury allocation vests over 4 years; Monolith allocation vests over 2 years; team allocation vests over 4 years with 1-year cliff.  
-* Use RevenueRouter as Lender operator, with governance-controlled revenue routing and full operator/operator-or-manager wrappers.  
-* Allow revenue routing weights to sum below 100%, with residual revenue routed to DAO Treasury.  
-* Use Synthetix-style 14-day reward streaming for GovTokenStaking revenue share, with rewardDuration changeable by governance for future streams.  
-* Use non-transferable stGOV with vote delegation.  
-* Use a 14-day stGOV withdrawal cooldown with linear/proportional withdrawals as time passes. Cooldown duration should be governance-changeable for future cooldowns.  
-* Cooling-down balances should not earn revenue and should not have voting power.  
-* Use 1-day voting delay, 5-day voting period, 2-day timelock, practical early quorum, checkpointed voting power, and 12-month cancel guardian.  
-* Do not hardcode LP/bribe integrations. Use treasury and delegated budgets instead.  
-* Official UI support requires verifiable factory deployment, standard role wiring, allocation disclosures, vesting disclosures, staking/revenue disclosures, and governance-risk disclosures.
-
-# **9\. Implementation notes to resolve during development**
-
-* Choose whether cooldown accounting is implemented directly in GovTokenStaking or in a small WithdrawalEscrow. Direct implementation is sufficient; a separate escrow is only an engineering separation choice.  
-* Choose whether multiple cooldown positions are stored as lots or consolidated. Preferred UX: existing partially elapsed cooldowns should not be reset when a user cools additional tokens.  
-* Define exact governance bounds, if any, for rewardDuration and withdrawal cooldown changes.  
-* Choose whether the Treasury is the Timelock itself or a separate CoinTreasury controlled by Timelock.  
-* Confirm the fixed Monolith vesting recipient address.  
-* Confirm the default initial quorum formula: low fixed threshold, percentage of stGOV supply at snapshot, or hybrid with a minimum floor.
+This keeps treasury control close to the battle-tested OpenZeppelin governance model. Any incentives, grants, liquidity seeding, market-maker budgets, or partner programs are funded by Timelock proposal.
+
+## 6. RevenueRouter
+
+`RevenueRouter` is the Lender operator and a minimal two-destination splitter.
+
+### 6.1 Purpose
+
+- The Monolith Lender mints local reserves to its operator.
+- `RevenueRouter` is the operator address.
+- Anyone may trigger reserve collection if the Lender allows permissionless reserve pulls.
+- When `distribute()` is called, the router splits its Coin balance between the Timelock treasury and `stGovToken`.
+
+### 6.2 State
+
+The router stores only what it needs:
+
+- `coin`: Monolith Coin token.
+- `treasury`: Timelock address.
+- `stGovToken`: reward recipient.
+- `revShareBps`: share of Coin revenue sent to `stGovToken`.
+
+Default `revShareBps` is `5_000`, meaning 50% to `stGovToken` and 50% to Timelock.
+
+### 6.3 Functions
+
+`distribute()`:
+
+- Reads the router's full Coin balance.
+- Computes `stGovAmount = balance * revShareBps / 10_000`.
+- Computes `treasuryAmount = balance - stGovAmount`.
+- Transfers `treasuryAmount` to Timelock.
+- Transfers or approves `stGovAmount` to `stGovToken`.
+- Calls the `stGovToken` reward notification function atomically.
+
+`setRevShareBps(uint16 newRevShareBps)`:
+
+- Callable only by Timelock governance.
+- Reverts if `newRevShareBps > 10_000`.
+- Updates the `stGovToken` revenue share.
+
+The router must not support:
+
+- arbitrary recipient lists,
+- arbitrary routing weights,
+- external incentive routing,
+- treasury execution,
+- custody of unrelated assets,
+- non-Coin revenue in v1.
+
+## 7. stGovToken design
+
+`stGovToken` is the main composed contract in the system.
+
+### 7.1 Inheritance and composition
+
+Use OpenZeppelin modules directly, without forking:
+
+- ERC20-compatible token surface.
+- `ERC20Wrapper`-style 1:1 backing by `GovToken`.
+- `ERC20Votes` for delegation and historical checkpoints.
+- Optional `ERC20Permit` if useful for delegation or approvals.
+
+Add project logic only where needed:
+
+- non-transferability,
+- stake/unstake entry points if the OpenZeppelin wrapper names are not the desired public API,
+- Synthetix-style multi-reward accounting,
+- reward notification access control.
+
+### 7.2 Reward streaming
+
+`stGovToken` should use Synthetix-style reward accounting:
+
+- Each reward token has `rewardRate`, `periodFinish`, `lastUpdateTime`, and `rewardPerTokenStored`.
+- Each user has `userRewardPerTokenPaid` and accrued rewards per reward token.
+- New rewards are streamed over `rewardDuration`.
+- If a previous stream is active, the unstreamed remainder rolls into the next stream.
+
+The Timelock can configure reward tokens and durations. `RevenueRouter` can notify Coin rewards.
+
+If GovToken is ever configured as a reward token, the implementation must preserve the invariant that the underlying GovToken backing all outstanding `stGovToken` is never paid out as rewards.
+
+### 7.3 Transfers and exits
+
+- Direct `transfer` and `transferFrom` of `stGovToken` revert.
+- Mint on stake and burn on unstake remain valid.
+- Unstaking is immediate in v1.
+- There is no withdrawal cooldown.
+
+## 8. Deployment flow
+
+1. Deployer creates a Monolith stablecoin as normal.
+2. If opted in, the CoinDAO deployment creates or wires:
+   - `GovToken`,
+   - `stGovToken`,
+   - Governor,
+   - Timelock,
+   - `RevenueRouter`,
+   - Coin staking rewards contract if enabled,
+   - OpenZeppelin vesting wallets.
+3. GovToken supply is minted once and allocated to rewards, vesting wallets, Timelock, and any immediate recipients.
+4. Timelock is configured as treasury and governance executor.
+5. Governor is configured to use `stGovToken` votes and Timelock execution.
+6. `RevenueRouter` is configured as the Lender operator.
+7. Lender manager defaults to Timelock unless the deployment intentionally delegates manager control to another address.
+8. Timelock-controlled roles are transferred to the Timelock, and any temporary deployment admin roles are renounced.
+
+## 9. UI and disclosure requirements
+
+The UI must show:
+
+- GovToken address, total supply, and allocation table.
+- stGovToken address, total staked GovToken, delegation state, voting power, reward tokens, reward rates, and claimable rewards.
+- Coin staking rewards contract, reward duration, funded rewards, and remaining rewards.
+- Timelock address, treasury balances, queued operations, and executed operations.
+- Governor address, voting delay, voting period, proposal threshold, quorum, and proposal states.
+- Cancel guardian address, `guardianExpiresAt`, and whether guardian power is active.
+- RevenueRouter address, Coin balance, current `revShareBps`, Timelock share, and stGovToken share.
+- Lender operator and manager addresses.
+- Vesting wallet addresses, recipients, start times, durations, cliffs, released amounts, and releasable amounts.
+
+## 10. Recommended v1 scope
+
+Build the CoinDAO stack around battle-tested primitives:
+
+- fixed-supply GovToken,
+- stGovToken voting/revenue wrapper,
+- OpenZeppelin Governor and Timelock,
+- Timelock-as-treasury,
+- RevenueRouter,
+- optional Synthetix-style Coin staking rewards,
+- OpenZeppelin vesting wallets,
+- temporary cancel guardian with automatic permission expiry.
+
+Excluded from v1:
+
+- CoinTreasury,
+- broad revenue routing,
+- arbitrary recipient weights,
+- active-emission scheduler,
+- no-staker emission pause,
+- custom emission curves,
+- withdrawal cooldowns,
+- hardcoded LP/bribe integrations,
+- custom treasury execution surfaces.
+
+Governance can still fund incentives, grants, partner integrations, and external reward programs through normal Timelock proposals.
+
+## 11. Test plan
+
+### 11.1 Governance and Timelock
+
+- Governor reads voting power from `stGovToken`, not `GovToken`.
+- Unstaked GovToken has zero votes.
+- Delegation and historical checkpoints work through OpenZeppelin `ERC20Votes`.
+- Successful proposals queue and execute through Timelock.
+- Timelock can hold and transfer treasury assets.
+- Temporary deployment admin roles are renounced.
+
+### 11.2 Guardian
+
+- Guardian can cancel proposals before `guardianExpiresAt`.
+- Guardian cannot cancel proposals at or after `guardianExpiresAt`.
+- Governance-controlled guardian updates still respect the expiry check.
+- UI-readable expiry data is exposed.
+
+### 11.3 stGovToken
+
+- Staking GovToken mints equal stGovToken.
+- Unstaking burns stGovToken and returns equal GovToken.
+- Direct stGovToken transfers revert.
+- Vote checkpoints update on stake, unstake, and delegation.
+- Rewards accrue only to current stGovToken holders according to reward-per-token accounting.
+- Claims do not affect other users' accrued rewards.
+- Reward notifications roll unstreamed rewards into the next stream.
+- Underlying GovToken backing cannot be paid out as rewards.
+
+### 11.4 RevenueRouter
+
+- Only Timelock can call `setRevShareBps`.
+- Values above `10_000` revert.
+- `distribute()` handles 0%, 50%, and 100% stGovToken share.
+- Treasury share is sent to Timelock.
+- stGovToken share is notified as streamed rewards.
+- Router cannot route to arbitrary recipients.
+
+### 11.5 Vesting and allocations
+
+- Allocation templates sum to 100%.
+- Team allocation cannot exceed 20%.
+- Team vesting has 4-year duration and 1-year cliff.
+- Timelock treasury vesting has 4-year linear vesting.
+- Monolith vesting has 2-year linear vesting.
+- Immediate Timelock budget is liquid on day 0.
+
+## 12. References
+
+- OpenZeppelin governance: https://docs.openzeppelin.com/contracts/5.x/governance
+- OpenZeppelin governance API: https://docs.openzeppelin.com/contracts/5.x/api/governance
+- OpenZeppelin ERC20Votes and ERC20Wrapper: https://docs.openzeppelin.com/contracts/5.x/api/token/erc20
+- OpenZeppelin vesting: https://docs.openzeppelin.com/contracts/5.x/api/finance
+- Synthetix StakingRewards pattern: https://github.com/Synthetixio/synthetix/blob/develop/contracts/StakingRewards.sol

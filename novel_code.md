@@ -31,11 +31,13 @@ Scope: `src/**` (deployed code) and `lib/**` (dependencies). Test code (`test/**
 | `src/GovToken.sol` | 29 | 🟡 Standard composition | OZ ERC20 + Permit + Votes | None (fixed-supply parameter only) |
 | `src/CoinDAOGovernor.sol` | 96 | 🟡 Standard composition | OZ `Governor` + extensions | None (parameters only) |
 | `src/RevenueRouter.sol` | 81 | 🔴 Novel | Written for Monolith | Yes |
-| `src/CoinDAOFactory.sol` | 236 | 🔴 Novel | Written for Monolith | Yes (most) |
+| `src/StakingRewardsFunder.sol` | 83 | 🔴 Novel | Written for Monolith | Yes |
+| `src/CoinDAOFactory.sol` | 245 | 🔴 Novel | Written for Monolith | Yes (most) |
 | `src/interfaces/IMonolith.sol` | 33 | 🔴 Novel (interface only) | Written for Monolith | No logic; bespoke ABI |
 
-Roughly **~320 lines of genuinely novel logic** (`CoinDAOFactory` + `RevenueRouter`) sit on top
-of **~1,250 lines of vendored, adapted, or standard-composition code** plus the entire OpenZeppelin
+Roughly **~410 lines of genuinely novel logic** (`CoinDAOFactory` + `RevenueRouter` +
+`StakingRewardsFunder`) sit on top of **~1,240 lines of vendored, adapted, or
+standard-composition code** plus the entire OpenZeppelin
 library.
 
 ---
@@ -64,7 +66,9 @@ unmodified and relied on by nearly every contract here:
 - `GovToken`: `ERC20`, `ERC20Permit`, `ERC20Votes`, `Nonces`.
 - `CoinDAOGovernor`: `Governor`, `GovernorSettings`, `GovernorCountingSimple`, `GovernorVotes`, `GovernorVotesQuorumFraction`, `GovernorTimelockControl`.
 - `CoinDAOFactory`: `TimelockController`, `VestingWallet` (treasury / Monolith / deployer vesting), `IVotes`, `SafeERC20`.
-- `RevenueRouter`, `StakingRewards`: `Ownable`, `ReentrancyGuard`, `SafeERC20`.
+- `RevenueRouter`: `Ownable`, `SafeERC20`.
+- `StakingRewards`: `Ownable`, `ReentrancyGuard`, `SafeERC20`.
+- `StakingRewardsFunder`: `ReentrancyGuard`, `SafeERC20`.
 - `UniStaker`: `Multicall`, `Nonces`, `SignatureChecker`, `EIP712`, `SafeERC20`.
 
 All treasury/vesting behavior (`VestingWallet`), the timelock (`TimelockController`), and the
@@ -81,7 +85,7 @@ Synthetix `StakingRewards`** (MIT) — the canonical, long-lived staking-rewards
 mainnet for years (`0x8302fe9f0c509a996573d3cc5b0d5d51e4fdd5ec`).
 
 - **Battle-tested:** the reward-rate math and core stake/withdraw/claim flow follow Synthetix `StakingRewards`.
-- **Changed from Synthetix:** SafeMath calls are replaced with Solidity 0.8 built-in checked arithmetic; the reward duration is constructor-supplied/immutable (the factory uses 4 years for launch rewards); pause, `recoverERC20`, and mutable `setRewardsDuration` functionality are removed because the launch flow does not need them.
+- **Changed from Synthetix:** SafeMath calls are replaced with Solidity 0.8 built-in checked arithmetic; the reward duration is constructor-supplied/immutable (the factory uses 365 days per tranche); pause, `recoverERC20`, and mutable `setRewardsDuration` functionality are removed because the launch flow does not need them.
 - **Known inherited caveat:** rewards that stream while `totalSupply == 0` accrue to nobody, matching upstream Synthetix behavior.
 
 ## 🟡 Standard composition — low/medium risk (new bytecode, no novel logic)
@@ -109,7 +113,7 @@ Risk is therefore **parameterization, not code** — e.g. quorum is now 1% of to
 
 ## 🔴 Novel — highest risk, primary audit targets
 
-### `src/CoinDAOFactory.sol` (~236 lines)
+### `src/CoinDAOFactory.sol` (~245 lines)
 The orchestration contract and the **single largest piece of original logic**. No upstream
 equivalent. It contains two distinct novel concerns:
 
@@ -124,14 +128,34 @@ equivalent. It contains two distinct novel concerns:
    derived-name Governor (`<GOV token name> Governor`); grants the Governor `PROPOSER`/`CANCELLER`
    on the timelock and renounces the factory's `DEFAULT_ADMIN_ROLE`; registers `RevenueRouter` as a
    UniStaker reward notifier then hands UniStaker admin to the timelock; sets `RevenueRouter` as the
-   Lender operator and transfers its ownership to the timelock; funds and notifies
-   CoinStakingRewards; funds treasury immediate/vesting, Monolith vesting, and optional deployer
-   vesting.
+   Lender operator and transfers its ownership to the timelock; deploys `StakingRewardsFunder`,
+   transfers the full CoinStakingRewards GOV allocation to it, sets it as the rewards distribution,
+   immediately funds tranche 0, and renounces `StakingRewards` ownership; funds treasury
+   immediate/vesting, Monolith vesting, and optional deployer vesting.
    A bug here is a **misconfiguration / privilege-escalation** risk rather than a math bug — the
    ordering and completeness of these handoffs is the thing to audit.
 
 It holds no funds after `deploy()` returns, but it is the trust root for how every deployed DAO
 is wired.
+
+### `src/StakingRewardsFunder.sol` (~83 lines)
+Small, fully novel GOV-emissions scheduler for CoinStakingRewards. The factory gives it the full
+CoinStakingRewards allocation up front, installs it as `StakingRewards.rewardsDistribution`, and
+uses it to start the first reward period during deployment.
+
+- **`fundNextTranche()`** — permissionless release function. It can only run when the previous
+  reward period has finished, verifies this contract is still the `rewardsDistribution`, advances
+  `nextTranche`, transfers the tranche amount to `StakingRewards`, and calls
+  `notifyRewardAmount`.
+- **Tranche schedule** — four yearly tranches: 32.5%, 27.5%, 22.5%, then final balance sweep.
+  The first three tranches are calculated from immutable `totalRewards`; the final tranche is the
+  funder's remaining reward-token balance so rounding dust is paid out.
+- **State model** — there is no separate `fundedRewards` counter. Progress is represented by
+  `nextTranche`; funded/unfunded amounts are observable from token balances and events.
+- **Assumption to audit** — the final balance sweep is correct for the factory path because the
+  funder receives the full allocation up front and has no alternate token outflow. If reused
+  outside that path, direct token transfers into the funder or incomplete prefunding would change
+  the final tranche amount.
 
 ### `src/RevenueRouter.sol` (~81 lines)
 Small but fully novel, and it touches money and privileged Lender control:
@@ -172,7 +196,8 @@ against the canonical Monolith ABI, not just compilation.
 
 1. **`CoinDAOFactory.sol`** — novel math (`allocationFor`) + novel privilege wiring (`deploy`).
 2. **`RevenueRouter.sol`** — novel fund-routing + privileged Lender manager replacement.
-3. **`StakingRewards.sol`** — adapted Synthetix contract; verify the built-in safe math port and intentionally removed hooks.
-4. **`IMonolith.sol`** — confirm the interface matches the live Monolith ABI exactly.
-5. **`CoinDAOGovernor.sol` / `GovToken.sol`** — review *parameters* (quorum, thresholds, periods), not logic.
-6. **UniStaker set + OpenZeppelin** — confirm versions/pins and the single pragma change; rely on upstream audits otherwise.
+3. **`StakingRewardsFunder.sol`** — novel tranche gating + final balance-sweep emission schedule.
+4. **`StakingRewards.sol`** — adapted Synthetix contract; verify the built-in safe math port and intentionally removed hooks.
+5. **`IMonolith.sol`** — confirm the interface matches the live Monolith ABI exactly.
+6. **`CoinDAOGovernor.sol` / `GovToken.sol`** — review *parameters* (quorum, thresholds, periods), not logic.
+7. **UniStaker set + OpenZeppelin** — confirm versions/pins and the single pragma change; rely on upstream audits otherwise.

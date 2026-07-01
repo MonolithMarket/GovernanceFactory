@@ -13,6 +13,7 @@ import {RevenueRouter} from "./RevenueRouter.sol";
 import {UniStaker} from "./UniStaker.sol";
 import {IERC20Delegates} from "./interfaces/IERC20Delegates.sol";
 import {StakingRewards} from "./StakingRewards.sol";
+import {StakingRewardsFunder} from "./StakingRewardsFunder.sol";
 import {IMonolithFactory, IMonolithLender} from "./interfaces/IMonolith.sol";
 
 contract CoinDAOFactory {
@@ -28,7 +29,7 @@ contract CoinDAOFactory {
 
     uint64 public constant FOUR_YEARS = 365 days * 4;
     uint256 public constant DEFAULT_TIMELOCK_DELAY = 2 days;
-    uint256 public constant COIN_STAKING_REWARD_DURATION = FOUR_YEARS;
+    uint256 public constant COIN_STAKING_REWARD_DURATION = 365 days;
 
     IMonolithFactory public immutable monolithFactory;
 
@@ -68,6 +69,7 @@ contract CoinDAOFactory {
         address stakingToken;
         address revenueRouter;
         address coinStakingRewards;
+        address coinStakingRewardsFunder;
         address treasuryVesting;
         address monolithVesting;
         address deployerVesting;
@@ -86,7 +88,8 @@ contract CoinDAOFactory {
         address governor,
         address timelock,
         address revenueRouter,
-        address coinStakingRewards
+        address coinStakingRewards,
+        address coinStakingRewardsFunder
     );
 
     error ZeroAddress();
@@ -128,59 +131,81 @@ contract CoinDAOFactory {
         monolithParams.operator = address(this);
         monolithParams.manager = params.manager;
 
-        (address lender, address coin, address vault) = monolithFactory.deploy(monolithParams);
-        if (lender == address(0) || coin == address(0) || vault == address(0)) revert ZeroAddress();
+        (deployment.lender, deployment.coin, deployment.vault) = monolithFactory.deploy(monolithParams);
+        if (deployment.lender == address(0) || deployment.coin == address(0) || deployment.vault == address(0)) {
+            revert ZeroAddress();
+        }
+        deployment.monolithFactory = address(monolithFactory);
 
         AllocationAmounts memory allocation = allocationFor(params.deployerStakeBps);
 
         // Deploy GOV, the timelock, staking, and the governor that will control the launch.
         GovToken govToken = new GovToken(params.govTokenName, params.govTokenSymbol, address(this));
+        deployment.govToken = address(govToken);
 
         address[] memory proposers = new address[](0);
         address[] memory executors = new address[](1);
         executors[0] = address(0);
         TimelockController timelock =
             new TimelockController(DEFAULT_TIMELOCK_DELAY, proposers, executors, address(this));
+        deployment.timelock = address(timelock);
 
-        UniStaker staker = new UniStaker(IERC20(coin), IERC20Delegates(address(govToken)), address(this));
+        UniStaker staker = new UniStaker(IERC20(deployment.coin), IERC20Delegates(deployment.govToken), address(this));
+        deployment.staker = address(staker);
 
         uint256 proposalThreshold = GOV_TOKEN_SUPPLY / 1_000;
         string memory governorName = string.concat(params.govTokenName, " Governor");
         CoinDAOGovernor governor =
             new CoinDAOGovernor(governorName, IVotes(address(govToken)), timelock, proposalThreshold);
+        deployment.governor = address(governor);
 
         // Move governance authority from the factory to the governor/timelock pair.
         timelock.grantRole(timelock.PROPOSER_ROLE(), address(governor));
         timelock.grantRole(timelock.CANCELLER_ROLE(), address(governor));
         timelock.renounceRole(timelock.DEFAULT_ADMIN_ROLE(), address(this));
 
-        address stakingToken = params.stakingTokenChoice == StakingTokenChoice.Coin ? coin : vault;
+        address stakingToken = params.stakingTokenChoice == StakingTokenChoice.Coin ? deployment.coin : deployment.vault;
+        deployment.stakingToken = stakingToken;
         StakingRewards coinStakingRewards =
             new StakingRewards(stakingToken, address(govToken), address(this), COIN_STAKING_REWARD_DURATION);
+        deployment.coinStakingRewards = address(coinStakingRewards);
+        StakingRewardsFunder coinStakingRewardsFunder =
+            new StakingRewardsFunder(coinStakingRewards, allocation.coinStakingRewards);
+        deployment.coinStakingRewardsFunder = address(coinStakingRewardsFunder);
 
-        RevenueRouter revenueRouter =
-            new RevenueRouter(lender, coin, address(timelock), address(staker), DEFAULT_GOV_STAKING_BPS, address(this));
+        RevenueRouter revenueRouter = new RevenueRouter(
+            deployment.lender,
+            deployment.coin,
+            deployment.timelock,
+            deployment.staker,
+            DEFAULT_GOV_STAKING_BPS,
+            address(this)
+        );
+        deployment.revenueRouter = address(revenueRouter);
 
         // Route lender revenue through the staker while leaving future management under timelock control.
-        IMonolithLender(lender).setPendingOperator(address(revenueRouter));
+        IMonolithLender(deployment.lender).setPendingOperator(deployment.revenueRouter);
         revenueRouter.acceptLenderOperator();
-        revenueRouter.transferOwnership(address(timelock));
-        staker.setRewardNotifier(address(revenueRouter), true);
-        staker.setAdmin(address(timelock));
+        revenueRouter.transferOwnership(deployment.timelock);
+        staker.setRewardNotifier(deployment.revenueRouter, true);
+        staker.setAdmin(deployment.timelock);
 
         // Prepare vesting recipients before distributing the fixed GOV supply.
-        VestingWallet treasuryVesting = new VestingWallet(address(timelock), uint64(block.timestamp), FOUR_YEARS);
+        VestingWallet treasuryVesting = new VestingWallet(deployment.timelock, uint64(block.timestamp), FOUR_YEARS);
+        deployment.treasuryVesting = address(treasuryVesting);
         VestingWallet monolithVesting = new VestingWallet(params.monolithRecipient, uint64(block.timestamp), FOUR_YEARS);
+        deployment.monolithVesting = address(monolithVesting);
         VestingWallet deployerVesting;
         if (allocation.deployerVesting != 0) {
             deployerVesting = new VestingWallet(params.deployerRecipient, uint64(block.timestamp), FOUR_YEARS);
+            deployment.deployerVesting = address(deployerVesting);
         }
 
         IERC20 govTokenErc20 = IERC20(address(govToken));
-        govTokenErc20.safeTransfer(address(coinStakingRewards), allocation.coinStakingRewards);
-        coinStakingRewards.notifyRewardAmount(allocation.coinStakingRewards);
-        coinStakingRewards.setRewardsDistribution(address(timelock));
-        coinStakingRewards.transferOwnership(address(timelock));
+        govTokenErc20.safeTransfer(address(coinStakingRewardsFunder), allocation.coinStakingRewards);
+        coinStakingRewards.setRewardsDistribution(address(coinStakingRewardsFunder));
+        coinStakingRewardsFunder.fundNextTranche();
+        coinStakingRewards.renounceOwnership();
 
         // Fund the remaining allocations; the treasury receives liquid GOV plus its vesting wallet.
         govTokenErc20.safeTransfer(address(timelock), allocation.immediateTreasuryAllocation);
@@ -191,36 +216,20 @@ contract CoinDAOFactory {
         }
 
         // Store and emit the deployment map for callers and indexers.
-        deployment = Deployment({
-            govToken: address(govToken),
-            staker: address(staker),
-            governor: address(governor),
-            timelock: address(timelock),
-            monolithFactory: address(monolithFactory),
-            lender: lender,
-            coin: coin,
-            vault: vault,
-            stakingToken: stakingToken,
-            revenueRouter: address(revenueRouter),
-            coinStakingRewards: address(coinStakingRewards),
-            treasuryVesting: address(treasuryVesting),
-            monolithVesting: address(monolithVesting),
-            deployerVesting: address(deployerVesting)
-        });
-
         _deployments.push(deployment);
         emit CoinDAODeployed(
             _deployments.length - 1,
-            lender,
-            coin,
-            address(monolithFactory),
-            vault,
-            address(govToken),
-            address(staker),
-            address(governor),
-            address(timelock),
-            address(revenueRouter),
-            address(coinStakingRewards)
+            deployment.lender,
+            deployment.coin,
+            deployment.monolithFactory,
+            deployment.vault,
+            deployment.govToken,
+            deployment.staker,
+            deployment.governor,
+            deployment.timelock,
+            deployment.revenueRouter,
+            deployment.coinStakingRewards,
+            deployment.coinStakingRewardsFunder
         );
     }
 

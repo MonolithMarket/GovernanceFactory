@@ -39,6 +39,12 @@ contract StakingRewardsFunder is ReentrancyGuard {
         totalRewards = totalRewards_;
     }
 
+    //Each tranche has basispoints corresponding to percentage of total GOV tokens that will be issued to Coin stakers
+    // Current implementation issues yearly tranches:
+    // Tranche 1: 32.5%
+    // Tranche 2: 27.5%
+    // Tranche 3: 22.5%
+    // Tranche 4: 17.5%
     function trancheBps(uint256 tranche) public pure returns (uint16) {
         if (tranche == 0) return 3_250;
         if (tranche == 1) return 2_750;

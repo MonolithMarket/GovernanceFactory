@@ -150,10 +150,11 @@ contract CoinDAOFactoryTest is Test {
         RevenueRouter(deployment.revenueRouter).setManager(newManager);
         assertEq(lender.manager(), newManager);
 
-        deal(deployment.coin, deployment.revenueRouter, 100 ether, true);
+        lender.setAccruedLocalReserves(100 ether);
         RevenueRouter(deployment.revenueRouter).distribute();
         assertEq(IERC20(deployment.coin).balanceOf(deployment.staker), 100 ether);
         assertEq(IERC20(deployment.coin).balanceOf(deployment.timelock), 0);
+        assertEq(lender.accruedLocalReserves(), 0);
     }
 
     function testStakerEarnsCoinRevenueAndPreservesVotes() public {

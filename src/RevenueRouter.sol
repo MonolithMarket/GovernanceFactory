@@ -52,6 +52,8 @@ contract RevenueRouter is Ownable {
     }
 
     function distribute() external returns (uint256 treasuryAmount, uint256 govStakingAmount) {
+        lender.pullLocalReserves();
+
         uint256 amount = coin.balanceOf(address(this));
         govStakingAmount = (amount * govStakingBps) / MAX_BPS;
         treasuryAmount = amount - govStakingAmount;

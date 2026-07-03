@@ -10,6 +10,7 @@ contract MockMonolithLender {
     address public manager;
     address public immutable coin;
     address public immutable vault;
+    uint256 public accruedLocalReserves;
 
     error Unauthorized();
     error ZeroAddress();
@@ -36,6 +37,16 @@ contract MockMonolithLender {
         if (msg.sender != operator && msg.sender != manager) revert Unauthorized();
         if (manager_ == address(0)) revert ZeroAddress();
         manager = manager_;
+    }
+
+    function setAccruedLocalReserves(uint256 amount) external {
+        accruedLocalReserves = amount;
+    }
+
+    function pullLocalReserves() external {
+        if (accruedLocalReserves == 0) return;
+        MockERC20(coin).mint(operator, accruedLocalReserves);
+        accruedLocalReserves = 0;
     }
 }
 

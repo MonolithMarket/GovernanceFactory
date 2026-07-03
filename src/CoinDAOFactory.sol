@@ -62,7 +62,6 @@ contract CoinDAOFactory {
         address staker;
         address governor;
         address timelock;
-        address monolithFactory;
         address lender;
         address coin;
         address vault;
@@ -135,7 +134,6 @@ contract CoinDAOFactory {
         if (deployment.lender == address(0) || deployment.coin == address(0) || deployment.vault == address(0)) {
             revert ZeroAddress();
         }
-        deployment.monolithFactory = address(monolithFactory);
 
         AllocationAmounts memory allocation = allocationFor(params.deployerStakeBps);
 
@@ -221,7 +219,7 @@ contract CoinDAOFactory {
             _deployments.length - 1,
             deployment.lender,
             deployment.coin,
-            deployment.monolithFactory,
+            address(monolithFactory),
             deployment.vault,
             deployment.govToken,
             deployment.staker,

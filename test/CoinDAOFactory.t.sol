@@ -74,7 +74,6 @@ contract CoinDAOFactoryTest is Test {
         CoinDAOFactory.AllocationAmounts memory allocation = factory.allocationFor(1_000);
 
         assertEq(factory.deploymentsLength(), 1);
-        assertEq(deployment.monolithFactory, address(monolithFactory));
         assertEq(deployment.stakingToken, deployment.coin);
         assertEq(CoinDAOGovernor(payable(deployment.governor)).name(), "Example GOV Governor");
         assertEq(MockMonolithLender(deployment.lender).operator(), deployment.revenueRouter);

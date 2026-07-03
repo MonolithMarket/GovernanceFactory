@@ -13,6 +13,9 @@ import {EIP712} from "openzeppelin/utils/cryptography/EIP712.sol";
 
 /// @title UniStaker
 /// @author ScopeLift
+/// @dev Vendored from the UniStaker repository.
+/// GitHub: https://github.com/uniswapfoundation/UniStaker
+/// Live deployment: https://etherscan.io/address/0xE3071e87a7E6dD19A911Dbf1127BA9dD67Aa6fc8
 /// @notice This contract manages the distribution of rewards to stakers. Rewards are denominated
 /// in an ERC20 token and sent to the contract by authorized reward notifiers. To stake means to
 /// deposit a designated, delegable ERC20 governance token and leave it over a period of time.

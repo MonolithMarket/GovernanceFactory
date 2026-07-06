@@ -11,7 +11,7 @@ import {CoinDAOFactory} from "../src/CoinDAOFactory.sol";
 import {CoinDAOGovernor} from "../src/CoinDAOGovernor.sol";
 import {GovToken} from "../src/GovToken.sol";
 import {RevenueRouter} from "../src/RevenueRouter.sol";
-import {UniStaker} from "../src/UniStaker.sol";
+import {StakedGovToken} from "../src/StakedGovToken.sol";
 import {StakingRewards} from "../src/StakingRewards.sol";
 import {StakingRewardsFunder} from "../src/StakingRewardsFunder.sol";
 import {IMonolithFactory} from "../src/interfaces/IMonolith.sol";
@@ -103,12 +103,19 @@ contract CoinDAOFactoryTest is Test {
         assertEq(address(rewardsFunder.rewardsToken()), deployment.govToken);
         assertEq(rewardsFunder.totalRewards(), allocation.coinStakingRewards);
         assertEq(rewardsFunder.nextTranche(), 1);
-        assertEq(UniStaker(deployment.staker).admin(), deployment.timelock);
+        CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
+        StakedGovToken staker = StakedGovToken(deployment.staker);
+
+        assertEq(address(governor.token()), deployment.staker);
+        assertEq(governor.fixedQuorum(), factory.GOVERNOR_QUORUM());
+        assertEq(governor.quorum(block.number), factory.GOVERNOR_QUORUM());
+        assertEq(staker.owner(), deployment.timelock);
+        assertEq(staker.rewardsDuration(), factory.GOV_STAKING_REWARD_DURATION());
         assertEq(Ownable(deployment.revenueRouter).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.treasuryVesting)).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.monolithVesting)).owner(), monolithRecipient);
         assertEq(VestingWallet(payable(deployment.deployerVesting)).owner(), deployerRecipient);
-        assertTrue(UniStaker(deployment.staker).isRewardNotifier(deployment.revenueRouter));
+        assertTrue(staker.isRewardNotifier(deployment.revenueRouter));
         assertEq(RevenueRouter(deployment.revenueRouter).govStakingBps(), 10_000);
         assertFalse(TimelockController(payable(deployment.timelock)).hasRole(bytes32(0), address(factory)));
     }
@@ -155,6 +162,8 @@ contract CoinDAOFactoryTest is Test {
         assertEq(IERC20(deployment.coin).balanceOf(deployment.staker), 100 ether);
         assertEq(IERC20(deployment.coin).balanceOf(deployment.timelock), 0);
         assertEq(lender.accruedLocalReserves(), 0);
+        assertEq(StakedGovToken(deployment.staker).queuedRewards(), 100 ether);
+        assertEq(StakedGovToken(deployment.staker).periodFinish(), 0);
     }
 
     function testStakerEarnsCoinRevenueAndPreservesVotes() public {
@@ -162,14 +171,19 @@ contract CoinDAOFactoryTest is Test {
         address alice = address(0xA11CE);
         deal(deployment.govToken, alice, 100 ether, true);
 
+        StakedGovToken staker = StakedGovToken(deployment.staker);
+
         vm.startPrank(alice);
         IERC20(deployment.govToken).approve(deployment.staker, 100 ether);
-        UniStaker(deployment.staker).stake(uint96(100 ether), alice);
+        staker.depositFor(alice, 100 ether);
+        staker.delegate(alice);
         vm.stopPrank();
 
-        // Voting power of staked GOV is preserved via the delegation surrogate.
+        // Staked GOV is the governor vote token; raw GOV has no voting power.
         vm.roll(block.number + 1);
-        assertEq(GovToken(deployment.govToken).getVotes(alice), 100 ether);
+        assertEq(staker.getVotes(alice), 100 ether);
+        assertEq(IERC20(deployment.govToken).balanceOf(deployment.staker), 100 ether);
+        assertEq(staker.balanceOf(alice), 100 ether);
 
         // Revenue routed to the staker streams to the sole staker over the reward duration.
         deal(deployment.coin, deployment.revenueRouter, 30 ether, true);
@@ -177,7 +191,7 @@ contract CoinDAOFactoryTest is Test {
 
         vm.warp(block.timestamp + 30 days);
         vm.prank(alice);
-        UniStaker(deployment.staker).claimReward();
+        staker.claimReward();
         assertApproxEqAbs(IERC20(deployment.coin).balanceOf(alice), 30 ether, 1e12);
     }
 

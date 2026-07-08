@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-pragma solidity ^0.8.23;
+pragma solidity ^0.8.26;
 
 import {Governor} from "@openzeppelin/contracts/governance/Governor.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";

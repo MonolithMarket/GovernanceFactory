@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-pragma solidity ^0.8.23;
+pragma solidity ^0.8.26;
 
 /// @title INotifiableRewardReceiver
 /// @notice Minimal interface for contracts that receive externally forwarded reward tokens and

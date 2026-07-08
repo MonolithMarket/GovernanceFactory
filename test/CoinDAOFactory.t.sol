@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-pragma solidity ^0.8.23;
+pragma solidity ^0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -109,13 +109,12 @@ contract CoinDAOFactoryTest is Test {
         assertEq(address(governor.token()), deployment.staker);
         assertEq(governor.fixedQuorum(), factory.GOVERNOR_QUORUM());
         assertEq(governor.quorum(block.number), factory.GOVERNOR_QUORUM());
-        assertEq(staker.owner(), deployment.timelock);
+        assertEq(staker.rewardsDistribution(), deployment.revenueRouter);
         assertEq(staker.rewardsDuration(), factory.GOV_STAKING_REWARD_DURATION());
         assertEq(Ownable(deployment.revenueRouter).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.treasuryVesting)).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.monolithVesting)).owner(), monolithRecipient);
         assertEq(VestingWallet(payable(deployment.deployerVesting)).owner(), deployerRecipient);
-        assertTrue(staker.isRewardNotifier(deployment.revenueRouter));
         assertEq(RevenueRouter(deployment.revenueRouter).govStakingBps(), 10_000);
         assertFalse(TimelockController(payable(deployment.timelock)).hasRole(bytes32(0), address(factory)));
     }
@@ -126,6 +125,14 @@ contract CoinDAOFactoryTest is Test {
 
         assertEq(deployment.stakingToken, deployment.vault);
         assertEq(deployment.deployerVesting, address(0));
+    }
+
+    function testDeployTwiceKeepsRevenueRouterAsRewardsDistribution() public {
+        CoinDAOFactory.Deployment memory first = factory.deploy(_params(1_000, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOFactory.Deployment memory second = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.SCoin));
+
+        assertEq(StakedGovToken(first.staker).rewardsDistribution(), first.revenueRouter);
+        assertEq(StakedGovToken(second.staker).rewardsDistribution(), second.revenueRouter);
     }
 
     function testCoinStakingFunderReleasesSecondTranchePermissionlessly() public {
@@ -191,7 +198,7 @@ contract CoinDAOFactoryTest is Test {
 
         vm.warp(block.timestamp + 30 days);
         vm.prank(alice);
-        staker.claimReward();
+        staker.getReward();
         assertApproxEqAbs(IERC20(deployment.coin).balanceOf(alice), 30 ether, 1e12);
     }
 

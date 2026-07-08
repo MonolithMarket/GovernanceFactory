@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-pragma solidity ^0.8.23;
+pragma solidity ^0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -22,7 +22,6 @@ contract StakedGovTokenTest is Test {
         staker = new StakedGovToken(
             IERC20(address(gov)), IERC20(address(reward)), "Staked Governance", "sGOV", address(this), 30 days
         );
-        staker.setRewardNotifier(address(this), true);
 
         gov.transfer(alice, 1_000 ether);
     }
@@ -54,11 +53,23 @@ contract StakedGovTokenTest is Test {
         staker.transfer(bob, 1 ether);
     }
 
-    function testOnlyRewardNotifierCanNotifyRewards() public {
+    function testWithdrawFullyToSender() public {
+        _stakeAlice(100 ether);
+
+        vm.prank(alice);
+        staker.withdraw();
+
+        assertEq(staker.balanceOf(alice), 0);
+        assertEq(staker.totalSupply(), 0);
+        assertEq(gov.balanceOf(alice), 1_000 ether);
+        assertEq(gov.balanceOf(address(staker)), 0);
+    }
+
+    function testOnlyRewardsDistributionCanNotifyRewards() public {
         reward.mint(address(staker), 30 ether);
 
         vm.prank(alice);
-        vm.expectRevert(StakedGovToken.NotRewardNotifier.selector);
+        vm.expectRevert(bytes("Caller is not RewardsDistribution contract"));
         staker.notifyRewardAmount(30 ether);
     }
 
@@ -76,7 +87,7 @@ contract StakedGovTokenTest is Test {
 
         vm.warp(block.timestamp + 30 days);
         vm.prank(alice);
-        staker.claimReward();
+        staker.getReward();
 
         assertApproxEqAbs(reward.balanceOf(alice), 30 ether, 1e12);
     }
@@ -98,7 +109,7 @@ contract StakedGovTokenTest is Test {
         assertApproxEqAbs(staker.queuedRewards(), 20 ether, 1e12);
 
         vm.prank(alice);
-        staker.claimReward();
+        staker.getReward();
         assertApproxEqAbs(reward.balanceOf(alice), 10 ether, 1e12);
     }
 

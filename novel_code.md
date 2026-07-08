@@ -34,7 +34,7 @@ against by how much of it is original project logic versus reused library code. 
 
 The repository imports OpenZeppelin contracts unmodified for ERC20, ERC20Permit, ERC20Wrapper,
 ERC20Votes, Governor extensions, TimelockController, Ownable, SafeERC20, ReentrancyGuard,
-VestingWallet, Nonces, and EIP712 utilities. The main review question is not the library code
+VestingWallet, Nonces, RLP, and EIP712 utilities. The main review question is not the library code
 itself, but whether each composition uses the right parameters and ownership handoffs.
 
 ## Adapted Code
@@ -49,11 +49,12 @@ the default OZ `ERC20Votes` model.
 The reward accounting follows the Synthetix reward-per-token pattern. Project-specific additions
 are:
 
-- Reward notifier allowlist, controlled by the owner/timelock.
+- An immutable `rewardsDistribution` address, set to the `RevenueRouter` at deployment.
 - Coin rewards queue if no one has staked.
 - If the final staker exits during an active stream, undistributed rewards are moved back into
   `queuedRewards` instead of being lost.
 - `sGOV` is non-transferable except mint on deposit and burn on withdrawal.
+- `withdraw()` wraps `withdrawTo()` so callers can withdraw their full balance to themselves.
 
 These additions are the main audit focus for this file.
 
@@ -90,8 +91,12 @@ fraction of staked supply would make quorum easier as participation falls.
 The factory is the largest original surface area. `allocationFor()` implements fixed-supply GOV
 distribution math. `deploy()` wires the Monolith market, GOV token, `sGOV`, governor, timelock,
 staking rewards, revenue router, and vesting wallets, then hands authority to the timelock.
+Because `StakedGovToken` stores the revenue router as an immutable rewards distributor while the
+router also needs the staker address, the factory predicts its future `RevenueRouter` CREATE
+address with OpenZeppelin `RLP` and tracks its own create nonce.
 
-The main risks are misallocation, incorrect deployment ordering, and incomplete privilege handoff.
+The main risks are misallocation, incorrect deployment ordering and address prediction, and
+incomplete privilege handoff.
 
 ### `src/RevenueRouter.sol`
 

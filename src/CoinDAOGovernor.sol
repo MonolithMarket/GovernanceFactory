@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-pragma solidity ^0.8.23;
+pragma solidity ^0.8.26;
 
 import {Governor} from "@openzeppelin/contracts/governance/Governor.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
@@ -7,30 +7,27 @@ import {GovernorCountingSimple} from "@openzeppelin/contracts/governance/extensi
 import {GovernorSettings} from "@openzeppelin/contracts/governance/extensions/GovernorSettings.sol";
 import {GovernorTimelockControl} from "@openzeppelin/contracts/governance/extensions/GovernorTimelockControl.sol";
 import {GovernorVotes} from "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol";
-import {
-    GovernorVotesQuorumFraction
-} from "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-contract CoinDAOGovernor is
-    Governor,
-    GovernorSettings,
-    GovernorCountingSimple,
-    GovernorVotes,
-    GovernorVotesQuorumFraction,
-    GovernorTimelockControl
-{
+contract CoinDAOGovernor is Governor, GovernorSettings, GovernorCountingSimple, GovernorVotes, GovernorTimelockControl {
     uint48 public constant DEFAULT_VOTING_DELAY_BLOCKS = 7_200;
     uint32 public constant DEFAULT_VOTING_PERIOD_BLOCKS = 36_000;
-    uint256 public constant DEFAULT_QUORUM_NUMERATOR = 1;
+    uint256 public immutable fixedQuorum;
 
-    constructor(string memory name_, IVotes token_, TimelockController timelock_, uint256 proposalThreshold_)
+    constructor(
+        string memory name_,
+        IVotes token_,
+        TimelockController timelock_,
+        uint256 proposalThreshold_,
+        uint256 fixedQuorum_
+    )
         Governor(name_)
         GovernorSettings(DEFAULT_VOTING_DELAY_BLOCKS, DEFAULT_VOTING_PERIOD_BLOCKS, proposalThreshold_)
         GovernorVotes(token_)
-        GovernorVotesQuorumFraction(DEFAULT_QUORUM_NUMERATOR)
         GovernorTimelockControl(timelock_)
-    {}
+    {
+        fixedQuorum = fixedQuorum_;
+    }
 
     function votingDelay() public view override(Governor, GovernorSettings) returns (uint256) {
         return super.votingDelay();
@@ -57,8 +54,8 @@ contract CoinDAOGovernor is
         return super.proposalNeedsQueuing(proposalId);
     }
 
-    function quorum(uint256 timepoint) public view override(Governor, GovernorVotesQuorumFraction) returns (uint256) {
-        return super.quorum(timepoint);
+    function quorum(uint256) public view override returns (uint256) {
+        return fixedQuorum;
     }
 
     function _queueOperations(

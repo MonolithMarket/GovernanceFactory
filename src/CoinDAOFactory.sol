@@ -1,23 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-pragma solidity ^0.8.23;
+pragma solidity ^0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
+import {RLP} from "@openzeppelin/contracts/utils/RLP.sol";
 
 import {CoinDAOGovernor} from "./CoinDAOGovernor.sol";
 import {GOV_TOKEN_SUPPLY as FIXED_GOV_TOKEN_SUPPLY, GovToken} from "./GovToken.sol";
 import {RevenueRouter} from "./RevenueRouter.sol";
-import {UniStaker} from "./UniStaker.sol";
-import {IERC20Delegates} from "./interfaces/IERC20Delegates.sol";
+import {StakedGovToken} from "./StakedGovToken.sol";
 import {StakingRewards} from "./StakingRewards.sol";
 import {StakingRewardsFunder} from "./StakingRewardsFunder.sol";
 import {IMonolithFactory, IMonolithLender} from "./interfaces/IMonolith.sol";
 
 contract CoinDAOFactory {
     using SafeERC20 for IERC20;
+    using RLP for *;
 
     uint16 public constant BPS = 10_000;
     uint16 public constant MAX_DEPLOYER_STAKE_BPS = 2_000;
@@ -26,12 +27,16 @@ contract CoinDAOFactory {
     uint16 public constant BASE_REWARDS_BPS = 6_666;
     uint16 public constant DEFAULT_GOV_STAKING_BPS = 10_000;
     uint256 public constant GOV_TOKEN_SUPPLY = FIXED_GOV_TOKEN_SUPPLY;
+    uint256 public constant GOVERNOR_PROPOSAL_THRESHOLD = GOV_TOKEN_SUPPLY / 1_000;
+    uint256 public constant GOVERNOR_QUORUM = GOV_TOKEN_SUPPLY / 100;
 
     uint64 public constant FOUR_YEARS = 365 days * 4;
     uint256 public constant DEFAULT_TIMELOCK_DELAY = 2 days;
     uint256 public constant COIN_STAKING_REWARD_DURATION = 365 days;
+    uint256 public constant GOV_STAKING_REWARD_DURATION = 30 days;
 
     IMonolithFactory public immutable monolithFactory;
+    uint256 private _nextCreateNonce = 1;
 
     enum StakingTokenChoice {
         Coin,
@@ -94,6 +99,7 @@ contract CoinDAOFactory {
     error ZeroAddress();
     error DeployerStakeExceedsMaximum(uint16 deployerStakeBps);
     error DeployerRecipientRequired();
+    error PredictedRevenueRouterMismatch(address predicted, address actual);
 
     constructor(IMonolithFactory monolithFactory_) {
         if (address(monolithFactory_) == address(0)) revert ZeroAddress();
@@ -139,6 +145,7 @@ contract CoinDAOFactory {
 
         // Deploy GOV, the timelock, staking, and the governor that will control the launch.
         GovToken govToken = new GovToken(params.govTokenName, params.govTokenSymbol, address(this));
+        _recordCreate();
         deployment.govToken = address(govToken);
 
         address[] memory proposers = new address[](0);
@@ -146,15 +153,40 @@ contract CoinDAOFactory {
         executors[0] = address(0);
         TimelockController timelock =
             new TimelockController(DEFAULT_TIMELOCK_DELAY, proposers, executors, address(this));
+        _recordCreate();
         deployment.timelock = address(timelock);
 
-        UniStaker staker = new UniStaker(IERC20(deployment.coin), IERC20Delegates(deployment.govToken), address(this));
+        address predictedRevenueRouter = _predictCreateAddress(1);
+        StakedGovToken staker = new StakedGovToken(
+            IERC20(deployment.govToken),
+            IERC20(deployment.coin),
+            string.concat("Staked ", params.govTokenName),
+            string.concat("s", params.govTokenSymbol),
+            predictedRevenueRouter,
+            GOV_STAKING_REWARD_DURATION
+        );
+        _recordCreate();
         deployment.staker = address(staker);
 
-        uint256 proposalThreshold = GOV_TOKEN_SUPPLY / 1_000;
+        RevenueRouter revenueRouter = new RevenueRouter(
+            deployment.lender,
+            deployment.coin,
+            deployment.timelock,
+            deployment.staker,
+            DEFAULT_GOV_STAKING_BPS,
+            address(this)
+        );
+        _recordCreate();
+        deployment.revenueRouter = address(revenueRouter);
+        if (deployment.revenueRouter != predictedRevenueRouter) {
+            revert PredictedRevenueRouterMismatch(predictedRevenueRouter, deployment.revenueRouter);
+        }
+
         string memory governorName = string.concat(params.govTokenName, " Governor");
-        CoinDAOGovernor governor =
-            new CoinDAOGovernor(governorName, IVotes(address(govToken)), timelock, proposalThreshold);
+        CoinDAOGovernor governor = new CoinDAOGovernor(
+            governorName, IVotes(address(staker)), timelock, GOVERNOR_PROPOSAL_THRESHOLD, GOVERNOR_QUORUM
+        );
+        _recordCreate();
         deployment.governor = address(governor);
 
         // Move governance authority from the factory to the governor/timelock pair.
@@ -166,36 +198,29 @@ contract CoinDAOFactory {
         deployment.stakingToken = stakingToken;
         StakingRewards coinStakingRewards =
             new StakingRewards(stakingToken, address(govToken), address(this), COIN_STAKING_REWARD_DURATION);
+        _recordCreate();
         deployment.coinStakingRewards = address(coinStakingRewards);
         StakingRewardsFunder coinStakingRewardsFunder =
             new StakingRewardsFunder(coinStakingRewards, allocation.coinStakingRewards);
+        _recordCreate();
         deployment.coinStakingRewardsFunder = address(coinStakingRewardsFunder);
-
-        RevenueRouter revenueRouter = new RevenueRouter(
-            deployment.lender,
-            deployment.coin,
-            deployment.timelock,
-            deployment.staker,
-            DEFAULT_GOV_STAKING_BPS,
-            address(this)
-        );
-        deployment.revenueRouter = address(revenueRouter);
 
         // Route lender revenue through the staker while leaving future management under timelock control.
         IMonolithLender(deployment.lender).setPendingOperator(deployment.revenueRouter);
         revenueRouter.acceptLenderOperator();
         revenueRouter.transferOwnership(deployment.timelock);
-        staker.setRewardNotifier(deployment.revenueRouter, true);
-        staker.setAdmin(deployment.timelock);
 
         // Prepare vesting recipients before distributing the fixed GOV supply.
         VestingWallet treasuryVesting = new VestingWallet(deployment.timelock, uint64(block.timestamp), FOUR_YEARS);
+        _recordCreate();
         deployment.treasuryVesting = address(treasuryVesting);
         VestingWallet monolithVesting = new VestingWallet(params.monolithRecipient, uint64(block.timestamp), FOUR_YEARS);
+        _recordCreate();
         deployment.monolithVesting = address(monolithVesting);
         VestingWallet deployerVesting;
         if (allocation.deployerVesting != 0) {
             deployerVesting = new VestingWallet(params.deployerRecipient, uint64(block.timestamp), FOUR_YEARS);
+            _recordCreate();
             deployment.deployerVesting = address(deployerVesting);
         }
 
@@ -239,5 +264,14 @@ contract CoinDAOFactory {
             revert DeployerStakeExceedsMaximum(params.deployerStakeBps);
         }
         if (params.deployerStakeBps != 0 && params.deployerRecipient == address(0)) revert DeployerRecipientRequired();
+    }
+
+    function _predictCreateAddress(uint256 offset) internal view returns (address) {
+        bytes memory rlp = RLP.encoder().push(address(this)).push(_nextCreateNonce + offset).encode();
+        return address(uint160(uint256(keccak256(rlp))));
+    }
+
+    function _recordCreate() internal {
+        ++_nextCreateNonce;
     }
 }

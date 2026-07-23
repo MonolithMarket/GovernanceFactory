@@ -9,24 +9,33 @@ import {GovernorTimelockControl} from "@openzeppelin/contracts/governance/extens
 import {GovernorVotes} from "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
+import {GOV_TOKEN_SUPPLY} from "./GovToken.sol";
+
 contract CoinDAOGovernor is Governor, GovernorSettings, GovernorCountingSimple, GovernorVotes, GovernorTimelockControl {
     uint48 public constant DEFAULT_VOTING_DELAY_BLOCKS = 7_200;
     uint32 public constant DEFAULT_VOTING_PERIOD_BLOCKS = 36_000;
-    uint256 public immutable fixedQuorum;
+    /// @dev Absolute number of GOV token votes needed to reach quorum.
+    uint256 private _quorum;
+
+    event QuorumSet(uint256 oldQuorum, uint256 newQuorum);
+
+    error InvalidQuorum(uint256 quorum);
 
     constructor(
         string memory name_,
         IVotes token_,
         TimelockController timelock_,
         uint256 proposalThreshold_,
-        uint256 fixedQuorum_
+        uint256 quorum_
     )
         Governor(name_)
         GovernorSettings(DEFAULT_VOTING_DELAY_BLOCKS, DEFAULT_VOTING_PERIOD_BLOCKS, proposalThreshold_)
         GovernorVotes(token_)
         GovernorTimelockControl(timelock_)
     {
-        fixedQuorum = fixedQuorum_;
+        if (quorum_ == 0 || quorum_ > GOV_TOKEN_SUPPLY) revert InvalidQuorum(quorum_);
+        _quorum = quorum_;
+        emit QuorumSet(0, quorum_);
     }
 
     function votingDelay() public view override(Governor, GovernorSettings) returns (uint256) {
@@ -55,7 +64,14 @@ contract CoinDAOGovernor is Governor, GovernorSettings, GovernorCountingSimple, 
     }
 
     function quorum(uint256) public view override returns (uint256) {
-        return fixedQuorum;
+        return _quorum;
+    }
+
+    function setQuorum(uint256 newQuorum) external onlyGovernance {
+        if (newQuorum == 0 || newQuorum > GOV_TOKEN_SUPPLY) revert InvalidQuorum(newQuorum);
+
+        emit QuorumSet(_quorum, newQuorum);
+        _quorum = newQuorum;
     }
 
     function _queueOperations(

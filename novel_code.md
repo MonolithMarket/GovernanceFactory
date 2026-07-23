@@ -21,7 +21,7 @@ against by how much of it is original project logic versus reused library code. 
 | `src/StakedGovToken.sol` | Adapted + standard composition | OZ ERC20Wrapper/ERC20Votes plus Synthetix reward accounting | Reward queueing, final-withdraw behavior, non-transferability |
 | `src/StakingRewards.sol` | Adapted | Synthetix `StakingRewards` | Solidity 0.8 port and intentionally removed hooks |
 | `src/GovToken.sol` | Standard composition | OZ ERC20 + ERC20Permit | Fixed supply and initial holder |
-| `src/CoinDAOGovernor.sol` | Standard composition | OZ Governor extensions | Fixed quorum/threshold parameters |
+| `src/CoinDAOGovernor.sol` | Standard composition | OZ Governor extensions | Absolute quorum/threshold parameters |
 | `src/RevenueRouter.sol` | Novel | Written for Monolith | Revenue split and Lender operator authority |
 | `src/StakingRewardsFunder.sol` | Novel | Written for Monolith | Tranche schedule and final balance sweep |
 | `src/CoinDAOFactory.sol` | Novel | Written for Monolith | Allocation math, deployment ordering, privilege handoff |
@@ -79,10 +79,13 @@ GovernorTimelockControl. The project-specific behavior is parameterization:
 - Voting delay: 7,200 blocks.
 - Voting period: 36,000 blocks.
 - Proposal threshold: 0.1% of fixed GOV supply, supplied by the factory.
-- Quorum: fixed at 1% of fixed GOV supply, supplied by the factory.
+- Initial quorum: 1% of fixed GOV supply, supplied by the factory.
 
-The quorum is fixed because `sGOV.totalSupply()` may be much lower than total GOV supply, and a
-fraction of staked supply would make quorum easier as participation falls.
+The quorum is an absolute `sGOV` vote amount because `sGOV.totalSupply()` may be much lower than
+total GOV supply, and a fraction of staked supply would make quorum easier as participation falls.
+Governance may update the absolute threshold between one wei and the full fixed GOV supply.
+Updates are not checkpointed: the latest quorum applies immediately to every proposal and every
+historical `quorum(timepoint)` query.
 
 ## Novel Code
 

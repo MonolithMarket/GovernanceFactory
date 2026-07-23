@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 
 import {CoinDAOFactory} from "../src/CoinDAOFactory.sol";
 import {CoinDAOGovernor} from "../src/CoinDAOGovernor.sol";
@@ -18,6 +19,8 @@ import {IMonolithFactory} from "../src/interfaces/IMonolith.sol";
 import {MockMonolithFactory, MockMonolithLender} from "./mocks/MockMonolith.sol";
 
 contract CoinDAOFactoryTest is Test {
+    event QuorumSet(uint256 oldQuorum, uint256 newQuorum);
+
     CoinDAOFactory internal factory;
     MockMonolithFactory internal monolithFactory;
 
@@ -107,7 +110,6 @@ contract CoinDAOFactoryTest is Test {
         StakedGovToken staker = StakedGovToken(deployment.staker);
 
         assertEq(address(governor.token()), deployment.staker);
-        assertEq(governor.fixedQuorum(), factory.GOVERNOR_QUORUM());
         assertEq(governor.quorum(block.number), factory.GOVERNOR_QUORUM());
         assertEq(staker.rewardsDistribution(), deployment.revenueRouter);
         assertEq(staker.rewardsDuration(), factory.GOV_STAKING_REWARD_DURATION());
@@ -125,6 +127,73 @@ contract CoinDAOFactoryTest is Test {
 
         assertEq(deployment.stakingToken, deployment.vault);
         assertEq(deployment.deployerVesting, address(0));
+    }
+
+    function testGovernorSetQuorumRejectsDirectCalls() public {
+        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
+
+        vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorOnlyExecutor.selector, address(this)));
+        governor.setQuorum(1);
+    }
+
+    function testGovernorSetsQuorumThroughGovernance() public {
+        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
+        uint256 oldQuorum = governor.quorum(block.number);
+        uint256 newQuorum = oldQuorum * 2;
+
+        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, bytes32 descriptionHash) =
+            _passAndQueueQuorumProposal(deployment, newQuorum, "Raise quorum");
+
+        vm.warp(block.timestamp + factory.DEFAULT_TIMELOCK_DELAY());
+        vm.expectEmit(false, false, false, true, address(governor));
+        emit QuorumSet(oldQuorum, newQuorum);
+        governor.execute(targets, values, calldatas, descriptionHash);
+
+        assertEq(governor.quorum(0), newQuorum);
+        assertEq(governor.quorum(block.number), newQuorum);
+    }
+
+    function testGovernorConstructorRejectsInvalidQuorum() public {
+        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        uint256 proposalThreshold = factory.GOVERNOR_PROPOSAL_THRESHOLD();
+        uint256 excessiveQuorum = factory.GOV_TOKEN_SUPPLY() + 1;
+
+        vm.expectRevert(abi.encodeWithSelector(CoinDAOGovernor.InvalidQuorum.selector, 0));
+        new CoinDAOGovernor(
+            "Invalid Governor",
+            StakedGovToken(deployment.staker),
+            TimelockController(payable(deployment.timelock)),
+            proposalThreshold,
+            0
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(CoinDAOGovernor.InvalidQuorum.selector, excessiveQuorum));
+        new CoinDAOGovernor(
+            "Invalid Governor",
+            StakedGovToken(deployment.staker),
+            TimelockController(payable(deployment.timelock)),
+            proposalThreshold,
+            excessiveQuorum
+        );
+    }
+
+    function testGovernorConstructorAcceptsQuorumBoundaries() public {
+        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        TimelockController timelock = TimelockController(payable(deployment.timelock));
+        StakedGovToken staker = StakedGovToken(deployment.staker);
+
+        vm.expectEmit(false, false, false, true);
+        emit QuorumSet(0, 1);
+        CoinDAOGovernor minimumGovernor =
+            new CoinDAOGovernor("Minimum Governor", staker, timelock, factory.GOVERNOR_PROPOSAL_THRESHOLD(), 1);
+        CoinDAOGovernor maximumGovernor = new CoinDAOGovernor(
+            "Maximum Governor", staker, timelock, factory.GOVERNOR_PROPOSAL_THRESHOLD(), factory.GOV_TOKEN_SUPPLY()
+        );
+
+        assertEq(minimumGovernor.quorum(block.number), 1);
+        assertEq(maximumGovernor.quorum(block.number), factory.GOV_TOKEN_SUPPLY());
     }
 
     function testDeployTwiceKeepsRevenueRouterAsRewardsDistribution() public {
@@ -234,6 +303,43 @@ contract CoinDAOFactoryTest is Test {
         params.monolithRecipient = monolithRecipient;
         params.manager = manager;
         params.stakingTokenChoice = stakingTokenChoice;
+    }
+
+    function _passAndQueueQuorumProposal(
+        CoinDAOFactory.Deployment memory deployment,
+        uint256 newQuorum,
+        string memory description
+    )
+        internal
+        returns (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, bytes32 descriptionHash)
+    {
+        CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
+        StakedGovToken staker = StakedGovToken(deployment.staker);
+        address voter = address(0xA11CE);
+        uint256 votingPower = governor.quorum(block.number) + 1;
+
+        deal(deployment.govToken, voter, votingPower, true);
+        vm.startPrank(voter);
+        IERC20(deployment.govToken).approve(deployment.staker, votingPower);
+        staker.depositFor(voter, votingPower);
+        staker.delegate(voter);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        targets = new address[](1);
+        targets[0] = address(governor);
+        values = new uint256[](1);
+        calldatas = new bytes[](1);
+        calldatas[0] = abi.encodeCall(governor.setQuorum, (newQuorum));
+        descriptionHash = keccak256(bytes(description));
+
+        vm.prank(voter);
+        uint256 proposalId = governor.propose(targets, values, calldatas, description);
+        vm.roll(governor.proposalSnapshot(proposalId) + 1);
+        vm.prank(voter);
+        governor.castVote(proposalId, 1);
+        vm.roll(governor.proposalDeadline(proposalId) + 1);
+        governor.queue(targets, values, calldatas, descriptionHash);
     }
 
     function _sum(CoinDAOFactory.AllocationAmounts memory allocation) internal pure returns (uint256) {

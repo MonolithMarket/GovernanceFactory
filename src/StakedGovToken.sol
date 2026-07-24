@@ -205,7 +205,11 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
             return;
         }
 
-        require(newRewardRate <= rewardsToken.balanceOf(address(this)) / rewardsDuration, "Provided reward too high");
+        if (newRewardRate > rewardsToken.balanceOf(address(this)) / rewardsDuration) {
+            queuedRewards += reward;
+            emit RewardQueued(reward);
+            return;
+        }
 
         rewardRate = newRewardRate;
         lastUpdateTime = block.timestamp;

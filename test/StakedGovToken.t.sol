@@ -92,6 +92,24 @@ contract StakedGovTokenTest is Test {
         assertApproxEqAbs(reward.balanceOf(alice), 30 ether, 1e12);
     }
 
+    function testUnderfundedQueuedRewardsDoNotBlockStaking() public {
+        staker.notifyRewardAmount(30 ether);
+
+        _stakeAlice(100 ether);
+
+        assertEq(staker.balanceOf(alice), 100 ether);
+        assertEq(gov.balanceOf(address(staker)), 100 ether);
+        assertEq(staker.queuedRewards(), 30 ether);
+        assertEq(staker.rewardRate(), 0);
+        assertEq(staker.periodFinish(), 0);
+
+        reward.mint(address(staker), 30 ether);
+        staker.notifyRewardAmount(0);
+
+        assertEq(staker.queuedRewards(), 0);
+        assertEq(staker.periodFinish(), block.timestamp + 30 days);
+    }
+
     function testFinalWithdrawQueuesUndistributedRewards() public {
         _stakeAlice(100 ether);
         reward.mint(address(staker), 30 ether);

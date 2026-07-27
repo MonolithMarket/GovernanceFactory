@@ -134,6 +134,10 @@ contract StakingRewards is Ownable, ReentrancyGuard {
     }
 
     // Functionally identical to Synthetix original, using Solidity built-in safe math.
+    //
+    // Rewards notified while `_totalSupply == 0` stream to nobody and are permanently locked, because `rewardPerToken()` does not accrue without stakers
+    // This is accepted by design — the window between tranche funding and the first staker is expected to be short
+    // Do not add queueing here without also gating StakingRewardsFunder as its tranche schedule relies on `periodFinish` advancing on notify
     function notifyRewardAmount(uint256 reward) external onlyRewardsDistribution updateReward(address(0)) {
         if (block.timestamp >= periodFinish) {
             rewardRate = reward / rewardsDuration;

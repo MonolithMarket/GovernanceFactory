@@ -14,10 +14,10 @@ interface IMonolithFactory {
         uint256 timeUntilImmutability;
         address operator;
         address manager;
-        address eventTriggerOperator;
         uint64 halfLife;
-        uint16 targetPsmDebtRatioStartBps;
-        uint16 targetPsmDebtRatioEndBps;
+        uint16 targetFreeDebtRatioStartBps;
+        uint16 targetFreeDebtRatioEndBps;
+        uint16 redeemFeeBps;
         uint32 stalenessThreshold;
         uint16 maxBorrowDeltaBps;
         uint128 psmVaultMinTotalSupply;

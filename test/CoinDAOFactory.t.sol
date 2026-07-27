@@ -304,10 +304,10 @@ contract CoinDAOFactoryTest is Test {
             timeUntilImmutability: 0,
             operator: address(0),
             manager: address(0),
-            eventTriggerOperator: address(0),
             halfLife: 0,
-            targetPsmDebtRatioStartBps: 0,
-            targetPsmDebtRatioEndBps: 0,
+            targetFreeDebtRatioStartBps: 0,
+            targetFreeDebtRatioEndBps: 0,
+            redeemFeeBps: 0,
             stalenessThreshold: 0,
             maxBorrowDeltaBps: 0,
             psmVaultMinTotalSupply: 0

@@ -72,9 +72,23 @@ contract CoinDAOFactoryTest is Test {
     }
 
     function testDeployWiresCoinStakingLaunch() public {
+        uint256 firstCreateNonce = vm.getNonce(address(factory));
         CoinDAOFactory.Deployment memory deployment =
             factory.deploy(_params(1_000, CoinDAOFactory.StakingTokenChoice.Coin));
         CoinDAOFactory.AllocationAmounts memory allocation = factory.allocationFor(1_000);
+
+        // Linked deployment libraries use DELEGATECALL, so every CREATE must still
+        // originate from the factory and preserve its nonce-based address sequence.
+        assertEq(deployment.govToken, vm.computeCreateAddress(address(factory), firstCreateNonce));
+        assertEq(deployment.timelock, vm.computeCreateAddress(address(factory), firstCreateNonce + 1));
+        assertEq(deployment.staker, vm.computeCreateAddress(address(factory), firstCreateNonce + 2));
+        assertEq(deployment.revenueRouter, vm.computeCreateAddress(address(factory), firstCreateNonce + 3));
+        assertEq(deployment.governor, vm.computeCreateAddress(address(factory), firstCreateNonce + 4));
+        assertEq(deployment.coinStakingRewards, vm.computeCreateAddress(address(factory), firstCreateNonce + 5));
+        assertEq(deployment.coinStakingRewardsFunder, vm.computeCreateAddress(address(factory), firstCreateNonce + 6));
+        assertEq(deployment.treasuryVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 7));
+        assertEq(deployment.monolithVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 8));
+        assertEq(deployment.deployerVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 9));
 
         assertEq(factory.deploymentsLength(), 1);
         assertEq(deployment.stakingToken, deployment.coin);

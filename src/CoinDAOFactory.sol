@@ -14,6 +14,12 @@ import {RevenueRouter} from "./RevenueRouter.sol";
 import {StakedGovToken} from "./StakedGovToken.sol";
 import {StakingRewards} from "./StakingRewards.sol";
 import {StakingRewardsFunder} from "./StakingRewardsFunder.sol";
+import {
+    CoreDeploymentLib,
+    GovernorDeploymentLib,
+    RewardsDeploymentLib,
+    StakingDeploymentLib
+} from "./deployment/DeploymentLibraries.sol";
 import {IMonolithFactory, IMonolithLender} from "./interfaces/IMonolith.sol";
 
 contract CoinDAOFactory {
@@ -144,37 +150,43 @@ contract CoinDAOFactory {
         AllocationAmounts memory allocation = allocationFor(params.deployerStakeBps);
 
         // Deploy GOV, the timelock, staking, and the governor that will control the launch.
-        GovToken govToken = new GovToken(params.govTokenName, params.govTokenSymbol, address(this));
+        GovToken govToken =
+            GovToken(CoreDeploymentLib.deployGovToken(params.govTokenName, params.govTokenSymbol, address(this)));
         _recordCreate();
         deployment.govToken = address(govToken);
 
         address[] memory proposers = new address[](0);
         address[] memory executors = new address[](1);
         executors[0] = address(0);
-        TimelockController timelock =
-            new TimelockController(DEFAULT_TIMELOCK_DELAY, proposers, executors, address(this));
+        TimelockController timelock = TimelockController(
+            payable(CoreDeploymentLib.deployTimelock(DEFAULT_TIMELOCK_DELAY, proposers, executors, address(this)))
+        );
         _recordCreate();
         deployment.timelock = address(timelock);
 
         address predictedRevenueRouter = _predictCreateAddress(1);
-        StakedGovToken staker = new StakedGovToken(
-            IERC20(deployment.govToken),
-            IERC20(deployment.coin),
-            string.concat("Staked ", params.govTokenName),
-            string.concat("s", params.govTokenSymbol),
-            predictedRevenueRouter,
-            GOV_STAKING_REWARD_DURATION
+        StakedGovToken staker = StakedGovToken(
+            StakingDeploymentLib.deployStakedGovToken(
+                IERC20(deployment.govToken),
+                IERC20(deployment.coin),
+                string.concat("Staked ", params.govTokenName),
+                string.concat("s", params.govTokenSymbol),
+                predictedRevenueRouter,
+                GOV_STAKING_REWARD_DURATION
+            )
         );
         _recordCreate();
         deployment.staker = address(staker);
 
-        RevenueRouter revenueRouter = new RevenueRouter(
-            deployment.lender,
-            deployment.coin,
-            deployment.timelock,
-            deployment.staker,
-            DEFAULT_GOV_STAKING_BPS,
-            address(this)
+        RevenueRouter revenueRouter = RevenueRouter(
+            StakingDeploymentLib.deployRevenueRouter(
+                deployment.lender,
+                deployment.coin,
+                deployment.timelock,
+                deployment.staker,
+                DEFAULT_GOV_STAKING_BPS,
+                address(this)
+            )
         );
         _recordCreate();
         deployment.revenueRouter = address(revenueRouter);
@@ -183,8 +195,10 @@ contract CoinDAOFactory {
         }
 
         string memory governorName = string.concat(params.govTokenName, " Governor");
-        CoinDAOGovernor governor = new CoinDAOGovernor(
-            governorName, IVotes(address(staker)), timelock, GOVERNOR_PROPOSAL_THRESHOLD, GOVERNOR_QUORUM
+        CoinDAOGovernor governor = CoinDAOGovernor(
+            payable(GovernorDeploymentLib.deployGovernor(
+                    governorName, IVotes(address(staker)), timelock, GOVERNOR_PROPOSAL_THRESHOLD, GOVERNOR_QUORUM
+                ))
         );
         _recordCreate();
         deployment.governor = address(governor);
@@ -196,12 +210,16 @@ contract CoinDAOFactory {
 
         address stakingToken = params.stakingTokenChoice == StakingTokenChoice.Coin ? deployment.coin : deployment.vault;
         deployment.stakingToken = stakingToken;
-        StakingRewards coinStakingRewards =
-            new StakingRewards(stakingToken, address(govToken), address(this), COIN_STAKING_REWARD_DURATION);
+        StakingRewards coinStakingRewards = StakingRewards(
+            RewardsDeploymentLib.deployStakingRewards(
+                stakingToken, address(govToken), address(this), COIN_STAKING_REWARD_DURATION
+            )
+        );
         _recordCreate();
         deployment.coinStakingRewards = address(coinStakingRewards);
-        StakingRewardsFunder coinStakingRewardsFunder =
-            new StakingRewardsFunder(coinStakingRewards, allocation.coinStakingRewards);
+        StakingRewardsFunder coinStakingRewardsFunder = StakingRewardsFunder(
+            RewardsDeploymentLib.deployStakingRewardsFunder(coinStakingRewards, allocation.coinStakingRewards)
+        );
         _recordCreate();
         deployment.coinStakingRewardsFunder = address(coinStakingRewardsFunder);
 
@@ -211,15 +229,25 @@ contract CoinDAOFactory {
         revenueRouter.transferOwnership(deployment.timelock);
 
         // Prepare vesting recipients before distributing the fixed GOV supply.
-        VestingWallet treasuryVesting = new VestingWallet(deployment.timelock, uint64(block.timestamp), FOUR_YEARS);
+        VestingWallet treasuryVesting = VestingWallet(
+            payable(CoreDeploymentLib.deployVestingWallet(deployment.timelock, uint64(block.timestamp), FOUR_YEARS))
+        );
         _recordCreate();
         deployment.treasuryVesting = address(treasuryVesting);
-        VestingWallet monolithVesting = new VestingWallet(params.monolithRecipient, uint64(block.timestamp), FOUR_YEARS);
+        VestingWallet monolithVesting = VestingWallet(
+            payable(CoreDeploymentLib.deployVestingWallet(
+                    params.monolithRecipient, uint64(block.timestamp), FOUR_YEARS
+                ))
+        );
         _recordCreate();
         deployment.monolithVesting = address(monolithVesting);
         VestingWallet deployerVesting;
         if (allocation.deployerVesting != 0) {
-            deployerVesting = new VestingWallet(params.deployerRecipient, uint64(block.timestamp), FOUR_YEARS);
+            deployerVesting = VestingWallet(
+                payable(CoreDeploymentLib.deployVestingWallet(
+                        params.deployerRecipient, uint64(block.timestamp), FOUR_YEARS
+                    ))
+            );
             _recordCreate();
             deployment.deployerVesting = address(deployerVesting);
         }

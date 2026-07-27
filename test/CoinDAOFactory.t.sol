@@ -155,6 +155,7 @@ contract CoinDAOFactoryTest is Test {
         CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
         CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
         uint256 oldQuorum = governor.quorum(block.number);
+        uint256 historicalTimepoint = governor.clock();
         uint256 newQuorum = oldQuorum * 2;
 
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, bytes32 descriptionHash) =
@@ -165,8 +166,58 @@ contract CoinDAOFactoryTest is Test {
         emit QuorumSet(oldQuorum, newQuorum);
         governor.execute(targets, values, calldatas, descriptionHash);
 
-        assertEq(governor.quorum(0), newQuorum);
+        assertEq(governor.quorum(historicalTimepoint), oldQuorum);
         assertEq(governor.quorum(block.number), newQuorum);
+    }
+
+    function testGovernorQuorumChangesDoNotApplyRetroactively() public {
+        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
+        StakedGovToken staker = StakedGovToken(deployment.staker);
+        address lowQuorumVoter = address(0xB0B);
+        uint256 oldQuorum = governor.quorum(block.number);
+        uint256 newQuorum = oldQuorum / 2;
+
+        deal(deployment.govToken, lowQuorumVoter, newQuorum, true);
+        vm.startPrank(lowQuorumVoter);
+        IERC20(deployment.govToken).approve(deployment.staker, newQuorum);
+        staker.depositFor(lowQuorumVoter, newQuorum);
+        staker.delegate(lowQuorumVoter);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        address[] memory defeatedTargets = new address[](1);
+        defeatedTargets[0] = address(governor);
+        uint256[] memory defeatedValues = new uint256[](1);
+        bytes[] memory defeatedCalldatas = new bytes[](1);
+        defeatedCalldatas[0] = abi.encodeCall(governor.setQuorum, (newQuorum));
+        string memory defeatedDescription = "Proposal below the original quorum";
+
+        vm.prank(lowQuorumVoter);
+        uint256 defeatedProposalId =
+            governor.propose(defeatedTargets, defeatedValues, defeatedCalldatas, defeatedDescription);
+        uint256 defeatedSnapshot = governor.proposalSnapshot(defeatedProposalId);
+
+        vm.roll(defeatedSnapshot + 1);
+        vm.prank(lowQuorumVoter);
+        governor.castVote(defeatedProposalId, 1);
+        vm.roll(governor.proposalDeadline(defeatedProposalId) + 1);
+
+        (, uint256 forVotes,) = governor.proposalVotes(defeatedProposalId);
+        assertEq(forVotes, newQuorum);
+        assertLt(forVotes, oldQuorum);
+        assertEq(uint256(governor.state(defeatedProposalId)), uint256(IGovernor.ProposalState.Defeated));
+        assertEq(governor.quorum(defeatedSnapshot), oldQuorum);
+
+        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, bytes32 descriptionHash) =
+            _passAndQueueQuorumProposal(deployment, newQuorum, "Lower quorum through governance");
+
+        vm.warp(block.timestamp + factory.DEFAULT_TIMELOCK_DELAY());
+        governor.execute(targets, values, calldatas, descriptionHash);
+
+        assertEq(governor.quorum(block.number), newQuorum);
+        assertEq(governor.quorum(defeatedSnapshot), oldQuorum);
+        assertEq(uint256(governor.state(defeatedProposalId)), uint256(IGovernor.ProposalState.Defeated));
     }
 
     function testGovernorConstructorRejectsInvalidQuorum() public {

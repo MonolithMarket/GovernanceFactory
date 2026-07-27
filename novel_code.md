@@ -84,8 +84,8 @@ GovernorTimelockControl. The project-specific behavior is parameterization:
 The quorum is an absolute `sGOV` vote amount because `sGOV.totalSupply()` may be much lower than
 total GOV supply, and a fraction of staked supply would make quorum easier as participation falls.
 Governance may update the absolute threshold between one wei and the full fixed GOV supply.
-Updates are not checkpointed: the latest quorum applies immediately to every proposal and every
-historical `quorum(timepoint)` query.
+Updates are checkpointed using the governor clock, so each proposal keeps the quorum that applied
+at its voting snapshot and historical `quorum(timepoint)` queries remain stable.
 
 ## Novel Code
 

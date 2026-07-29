@@ -11,9 +11,11 @@ contract MockMonolithLender {
     address public immutable coin;
     address public immutable vault;
     uint256 public accruedLocalReserves;
+    bool public failOperatorNomination;
 
     error Unauthorized();
     error ZeroAddress();
+    error ForcedFailure();
 
     constructor(address operator_, address manager_, address coin_, address vault_) {
         operator = operator_;
@@ -24,6 +26,7 @@ contract MockMonolithLender {
 
     function setPendingOperator(address pendingOperator_) external {
         if (msg.sender != operator) revert Unauthorized();
+        if (failOperatorNomination) revert ForcedFailure();
         pendingOperator = pendingOperator_;
     }
 
@@ -43,6 +46,10 @@ contract MockMonolithLender {
         accruedLocalReserves = amount;
     }
 
+    function setFailOperatorNomination(bool fail) external {
+        failOperatorNomination = fail;
+    }
+
     function pullLocalReserves() external {
         if (accruedLocalReserves == 0) return;
         MockERC20(coin).mint(operator, accruedLocalReserves);
@@ -52,6 +59,7 @@ contract MockMonolithLender {
 
 contract MockMonolithFactory is IMonolithFactory {
     address[] public lenders;
+    mapping(address lender => bool) public override isDeployed;
     DeployParams public lastParams;
 
     event Deployed(address indexed lender, address indexed coin, address indexed vault);
@@ -67,6 +75,7 @@ contract MockMonolithFactory is IMonolithFactory {
         coin = address(coinToken);
         vault = address(vaultToken);
         lenders.push(lender);
+        isDeployed[lender] = true;
         emit Deployed(lender, coin, vault);
     }
 

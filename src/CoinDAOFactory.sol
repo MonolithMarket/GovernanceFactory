@@ -49,14 +49,12 @@ contract CoinDAOFactory {
         SCoin
     }
 
-    struct LaunchParams {
+    struct GovLaunchParams {
         string govTokenName;
         string govTokenSymbol;
-        IMonolithFactory.DeployParams monolithParams;
         uint16 deployerStakeBps;
         address deployerRecipient;
         address monolithRecipient;
-        address manager;
         StakingTokenChoice stakingTokenChoice;
     }
 
@@ -85,7 +83,8 @@ contract CoinDAOFactory {
         address deployerVesting;
     }
 
-    Deployment[] private _deployments;
+    Deployment[] public deployments;
+    mapping(address lender => bool) public hasCoinDAO;
 
     event CoinDAODeployed(
         uint256 indexed id,
@@ -101,11 +100,16 @@ contract CoinDAOFactory {
         address coinStakingRewards,
         address coinStakingRewardsFunder
     );
+    event CoinDAOAttached(uint256 indexed id, address indexed lender, address indexed previousOperator);
 
     error ZeroAddress();
     error DeployerStakeExceedsMaximum(uint16 deployerStakeBps);
     error DeployerRecipientRequired();
     error PredictedRevenueRouterMismatch(address predicted, address actual);
+    error UnrecognizedLender(address lender);
+    error CoinDAOAlreadyExists(address lender);
+    error CallerNotLenderOperator(address caller, address operator);
+    error FactoryNotPendingOperator(address pendingOperator);
 
     constructor(IMonolithFactory monolithFactory_) {
         if (address(monolithFactory_) == address(0)) revert ZeroAddress();
@@ -113,11 +117,7 @@ contract CoinDAOFactory {
     }
 
     function deploymentsLength() external view returns (uint256) {
-        return _deployments.length;
-    }
-
-    function deployments(uint256 id) external view returns (Deployment memory) {
-        return _deployments[id];
+        return deployments.length;
     }
 
     function allocationFor(uint16 deployerStakeBps) public pure returns (AllocationAmounts memory allocation) {
@@ -134,18 +134,63 @@ contract CoinDAOFactory {
         allocation.treasuryVested = treasuryAllocation - allocation.immediateTreasuryAllocation;
     }
 
-    function deploy(LaunchParams calldata params) external returns (Deployment memory deployment) {
-        _validate(params);
+    function deploy(
+        GovLaunchParams calldata govParams,
+        IMonolithFactory.DeployParams calldata monolithParams_,
+        address manager
+    ) external returns (Deployment memory deployment) {
+        if (manager == address(0)) revert ZeroAddress();
+        _validate(govParams);
 
         // Deploy the Monolith market first; every downstream contract wires against these addresses.
-        IMonolithFactory.DeployParams memory monolithParams = params.monolithParams;
+        IMonolithFactory.DeployParams memory monolithParams = monolithParams_;
         monolithParams.operator = address(this);
-        monolithParams.manager = params.manager;
+        monolithParams.manager = manager;
 
         (deployment.lender, deployment.coin, deployment.vault) = monolithFactory.deploy(monolithParams);
         if (deployment.lender == address(0) || deployment.coin == address(0) || deployment.vault == address(0)) {
             revert ZeroAddress();
         }
+
+        deployment = _deployCoinDAO(deployment, govParams);
+    }
+
+    function deployForExistingCoin(GovLaunchParams calldata govParams, address lenderAddress)
+        external
+        returns (Deployment memory deployment)
+    {
+        _validate(govParams);
+
+        if (lenderAddress == address(0)) revert ZeroAddress();
+        if (!monolithFactory.isDeployed(lenderAddress)) revert UnrecognizedLender(lenderAddress);
+        if (hasCoinDAO[lenderAddress]) revert CoinDAOAlreadyExists(lenderAddress);
+
+        IMonolithLender lender = IMonolithLender(lenderAddress);
+        address previousOperator = lender.operator();
+        if (msg.sender != previousOperator) revert CallerNotLenderOperator(msg.sender, previousOperator);
+
+        address pendingOperator = lender.pendingOperator();
+        if (pendingOperator != address(this)) revert FactoryNotPendingOperator(pendingOperator);
+
+        deployment.lender = lenderAddress;
+        deployment.coin = lender.coin();
+        deployment.vault = lender.vault();
+
+        // The current operator has explicitly nominated this factory. Accepting
+        // here makes the complete factory -> RevenueRouter handoff atomic.
+        lender.acceptOperator();
+
+        deployment = _deployCoinDAO(deployment, govParams);
+
+        emit CoinDAOAttached(deployments.length - 1, lenderAddress, previousOperator);
+    }
+
+    function _deployCoinDAO(Deployment memory deployment, GovLaunchParams memory params)
+        internal
+        returns (Deployment memory)
+    {
+        if (hasCoinDAO[deployment.lender]) revert CoinDAOAlreadyExists(deployment.lender);
+        hasCoinDAO[deployment.lender] = true;
 
         AllocationAmounts memory allocation = allocationFor(params.deployerStakeBps);
 
@@ -267,9 +312,9 @@ contract CoinDAOFactory {
         }
 
         // Store and emit the deployment map for callers and indexers.
-        _deployments.push(deployment);
+        deployments.push(deployment);
         emit CoinDAODeployed(
-            _deployments.length - 1,
+            deployments.length - 1,
             deployment.lender,
             deployment.coin,
             address(monolithFactory),
@@ -282,16 +327,18 @@ contract CoinDAOFactory {
             deployment.coinStakingRewards,
             deployment.coinStakingRewardsFunder
         );
+
+        return deployment;
     }
 
-    function _validate(LaunchParams calldata params) internal pure {
-        if (params.monolithRecipient == address(0) || params.manager == address(0)) {
-            revert ZeroAddress();
-        }
+    function _validate(GovLaunchParams calldata params) internal pure {
+        if (params.monolithRecipient == address(0)) revert ZeroAddress();
         if (params.deployerStakeBps > MAX_DEPLOYER_STAKE_BPS) {
             revert DeployerStakeExceedsMaximum(params.deployerStakeBps);
         }
-        if (params.deployerStakeBps != 0 && params.deployerRecipient == address(0)) revert DeployerRecipientRequired();
+        if (params.deployerStakeBps != 0 && params.deployerRecipient == address(0)) {
+            revert DeployerRecipientRequired();
+        }
     }
 
     function _predictCreateAddress(uint256 offset) internal view returns (address) {

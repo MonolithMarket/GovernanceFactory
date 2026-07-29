@@ -24,9 +24,14 @@ interface IMonolithFactory {
     }
 
     function deploy(DeployParams calldata params) external returns (address lender, address coin, address vault);
+    function isDeployed(address lender) external view returns (bool);
 }
 
 interface IMonolithLender {
+    function operator() external view returns (address);
+    function pendingOperator() external view returns (address);
+    function coin() external view returns (address);
+    function vault() external view returns (address);
     function setPendingOperator(address pendingOperator) external;
     function acceptOperator() external;
     function setManager(address manager) external;

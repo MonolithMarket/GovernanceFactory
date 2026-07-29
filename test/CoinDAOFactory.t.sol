@@ -27,6 +27,8 @@ contract CoinDAOFactoryTest is Test {
     address internal manager = address(0x1001);
     address internal deployerRecipient = address(0x1002);
     address internal monolithRecipient = address(0x1003);
+    address internal existingOperator = address(0x1004);
+    address internal existingManager = address(0x1005);
 
     function setUp() public {
         monolithFactory = new MockMonolithFactory();
@@ -73,8 +75,7 @@ contract CoinDAOFactoryTest is Test {
 
     function testDeployWiresCoinStakingLaunch() public {
         uint256 firstCreateNonce = vm.getNonce(address(factory));
-        CoinDAOFactory.Deployment memory deployment =
-            factory.deploy(_params(1_000, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOFactory.Deployment memory deployment = _deploy(1_000, CoinDAOFactory.StakingTokenChoice.Coin);
         CoinDAOFactory.AllocationAmounts memory allocation = factory.allocationFor(1_000);
 
         // Linked deployment libraries use DELEGATECALL, so every CREATE must still
@@ -91,6 +92,7 @@ contract CoinDAOFactoryTest is Test {
         assertEq(deployment.deployerVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 9));
 
         assertEq(factory.deploymentsLength(), 1);
+        assertTrue(factory.hasCoinDAO(deployment.lender));
         assertEq(deployment.stakingToken, deployment.coin);
         assertEq(CoinDAOGovernor(payable(deployment.governor)).name(), "Example GOV Governor");
         assertEq(MockMonolithLender(deployment.lender).operator(), deployment.revenueRouter);
@@ -136,15 +138,148 @@ contract CoinDAOFactoryTest is Test {
     }
 
     function testDeployWiresSCoinStakingLaunch() public {
-        CoinDAOFactory.Deployment memory deployment =
-            factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.SCoin));
+        CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.SCoin);
 
         assertEq(deployment.stakingToken, deployment.vault);
         assertEq(deployment.deployerVesting, address(0));
     }
 
+    function testDeployForExistingCoinWiresFullCoinDAOAndPreservesManager() public {
+        (address lenderAddress, address coin, address vault) = _deployExistingMarket(existingOperator, existingManager);
+        MockMonolithLender lender = MockMonolithLender(lenderAddress);
+        CoinDAOFactory.GovLaunchParams memory govParams =
+            _existingGovParams(1_000, CoinDAOFactory.StakingTokenChoice.Coin);
+
+        vm.prank(existingOperator);
+        lender.setPendingOperator(address(factory));
+
+        uint256 firstCreateNonce = vm.getNonce(address(factory));
+        vm.prank(existingOperator);
+        CoinDAOFactory.Deployment memory deployment = factory.deployForExistingCoin(govParams, lenderAddress);
+        CoinDAOFactory.AllocationAmounts memory allocation = factory.allocationFor(govParams.deployerStakeBps);
+
+        assertEq(deployment.lender, lenderAddress);
+        assertEq(deployment.coin, coin);
+        assertEq(deployment.vault, vault);
+        assertEq(deployment.stakingToken, coin);
+        assertEq(deployment.govToken, vm.computeCreateAddress(address(factory), firstCreateNonce));
+        assertEq(deployment.timelock, vm.computeCreateAddress(address(factory), firstCreateNonce + 1));
+        assertEq(deployment.staker, vm.computeCreateAddress(address(factory), firstCreateNonce + 2));
+        assertEq(deployment.revenueRouter, vm.computeCreateAddress(address(factory), firstCreateNonce + 3));
+        assertEq(deployment.governor, vm.computeCreateAddress(address(factory), firstCreateNonce + 4));
+        assertEq(deployment.coinStakingRewards, vm.computeCreateAddress(address(factory), firstCreateNonce + 5));
+        assertEq(deployment.coinStakingRewardsFunder, vm.computeCreateAddress(address(factory), firstCreateNonce + 6));
+        assertEq(deployment.treasuryVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 7));
+        assertEq(deployment.monolithVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 8));
+        assertEq(deployment.deployerVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 9));
+
+        assertEq(factory.deploymentsLength(), 1);
+        assertTrue(factory.hasCoinDAO(lenderAddress));
+        assertEq(lender.operator(), deployment.revenueRouter);
+        assertEq(lender.pendingOperator(), address(0));
+        assertEq(lender.manager(), existingManager);
+        assertEq(Ownable(deployment.revenueRouter).owner(), deployment.timelock);
+        assertEq(StakedGovToken(deployment.staker).rewardsDistribution(), deployment.revenueRouter);
+
+        GovToken govToken = GovToken(deployment.govToken);
+        assertEq(govToken.balanceOf(deployment.timelock), allocation.immediateTreasuryAllocation);
+        assertEq(govToken.balanceOf(deployment.treasuryVesting), allocation.treasuryVested);
+        assertEq(govToken.balanceOf(deployment.monolithVesting), allocation.monolithVesting);
+        assertEq(govToken.balanceOf(deployment.deployerVesting), allocation.deployerVesting);
+
+        lender.setAccruedLocalReserves(100 ether);
+        RevenueRouter(deployment.revenueRouter).distribute();
+        assertEq(IERC20(coin).balanceOf(deployment.staker), 100 ether);
+    }
+
+    function testDeployForExistingCoinSupportsSCoinAndZeroDeployerAllocation() public {
+        (address lenderAddress,, address vault) = _deployExistingMarket(existingOperator, existingManager);
+        MockMonolithLender lender = MockMonolithLender(lenderAddress);
+
+        vm.prank(existingOperator);
+        lender.setPendingOperator(address(factory));
+        vm.prank(existingOperator);
+        CoinDAOFactory.Deployment memory deployment = factory.deployForExistingCoin(
+            _existingGovParams(0, CoinDAOFactory.StakingTokenChoice.SCoin), lenderAddress
+        );
+
+        assertEq(deployment.stakingToken, vault);
+        assertEq(deployment.deployerVesting, address(0));
+        assertEq(lender.manager(), existingManager);
+    }
+
+    function testDeployForExistingCoinRejectsUnrecognizedLender() public {
+        address unrecognizedLender = address(0xBAD);
+
+        vm.expectRevert(abi.encodeWithSelector(CoinDAOFactory.UnrecognizedLender.selector, unrecognizedLender));
+        vm.prank(existingOperator);
+        factory.deployForExistingCoin(_existingGovParams(0, CoinDAOFactory.StakingTokenChoice.Coin), unrecognizedLender);
+    }
+
+    function testDeployForExistingCoinRejectsCallerThatIsNotCurrentOperator() public {
+        (address lenderAddress,,) = _deployExistingMarket(existingOperator, existingManager);
+        MockMonolithLender lender = MockMonolithLender(lenderAddress);
+        address attacker = address(0xA77AC);
+
+        vm.prank(existingOperator);
+        lender.setPendingOperator(address(factory));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(CoinDAOFactory.CallerNotLenderOperator.selector, attacker, existingOperator)
+        );
+        vm.prank(attacker);
+        factory.deployForExistingCoin(_existingGovParams(0, CoinDAOFactory.StakingTokenChoice.Coin), lenderAddress);
+
+        assertEq(lender.operator(), existingOperator);
+        assertEq(lender.pendingOperator(), address(factory));
+        assertEq(factory.deploymentsLength(), 0);
+    }
+
+    function testDeployForExistingCoinRequiresFactoryNomination() public {
+        (address lenderAddress,,) = _deployExistingMarket(existingOperator, existingManager);
+
+        vm.expectRevert(abi.encodeWithSelector(CoinDAOFactory.FactoryNotPendingOperator.selector, address(0)));
+        vm.prank(existingOperator);
+        factory.deployForExistingCoin(_existingGovParams(0, CoinDAOFactory.StakingTokenChoice.Coin), lenderAddress);
+    }
+
+    function testDeployForExistingCoinRejectsDuplicate() public {
+        (address lenderAddress,,) = _deployExistingMarket(existingOperator, existingManager);
+        MockMonolithLender lender = MockMonolithLender(lenderAddress);
+        CoinDAOFactory.GovLaunchParams memory govParams = _existingGovParams(0, CoinDAOFactory.StakingTokenChoice.Coin);
+
+        vm.prank(existingOperator);
+        lender.setPendingOperator(address(factory));
+        vm.prank(existingOperator);
+        factory.deployForExistingCoin(govParams, lenderAddress);
+
+        vm.expectRevert(abi.encodeWithSelector(CoinDAOFactory.CoinDAOAlreadyExists.selector, lenderAddress));
+        factory.deployForExistingCoin(govParams, lenderAddress);
+    }
+
+    function testDeployForExistingCoinRollsBackAcceptedOperatorIfRouterHandoffFails() public {
+        (address lenderAddress,,) = _deployExistingMarket(existingOperator, existingManager);
+        MockMonolithLender lender = MockMonolithLender(lenderAddress);
+
+        vm.prank(existingOperator);
+        lender.setPendingOperator(address(factory));
+        lender.setFailOperatorNomination(true);
+        uint256 factoryNonce = vm.getNonce(address(factory));
+
+        vm.expectRevert(MockMonolithLender.ForcedFailure.selector);
+        vm.prank(existingOperator);
+        factory.deployForExistingCoin(_existingGovParams(0, CoinDAOFactory.StakingTokenChoice.Coin), lenderAddress);
+
+        assertEq(lender.operator(), existingOperator);
+        assertEq(lender.pendingOperator(), address(factory));
+        assertEq(lender.manager(), existingManager);
+        assertEq(factory.deploymentsLength(), 0);
+        assertFalse(factory.hasCoinDAO(lenderAddress));
+        assertEq(vm.getNonce(address(factory)), factoryNonce);
+    }
+
     function testGovernorSetQuorumRejectsDirectCalls() public {
-        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
         CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
 
         vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorOnlyExecutor.selector, address(this)));
@@ -152,7 +287,7 @@ contract CoinDAOFactoryTest is Test {
     }
 
     function testGovernorSetsQuorumThroughGovernance() public {
-        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
         CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
         uint256 oldQuorum = governor.quorum(block.number);
         uint256 historicalTimepoint = governor.clock();
@@ -171,7 +306,7 @@ contract CoinDAOFactoryTest is Test {
     }
 
     function testGovernorQuorumChangesDoNotApplyRetroactively() public {
-        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
         CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
         StakedGovToken staker = StakedGovToken(deployment.staker);
         address lowQuorumVoter = address(0xB0B);
@@ -221,7 +356,7 @@ contract CoinDAOFactoryTest is Test {
     }
 
     function testGovernorConstructorRejectsInvalidQuorum() public {
-        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
         uint256 proposalThreshold = factory.GOVERNOR_PROPOSAL_THRESHOLD();
         uint256 excessiveQuorum = factory.GOV_TOKEN_SUPPLY() + 1;
 
@@ -245,7 +380,7 @@ contract CoinDAOFactoryTest is Test {
     }
 
     function testGovernorConstructorAcceptsQuorumBoundaries() public {
-        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
         TimelockController timelock = TimelockController(payable(deployment.timelock));
         StakedGovToken staker = StakedGovToken(deployment.staker);
 
@@ -262,15 +397,15 @@ contract CoinDAOFactoryTest is Test {
     }
 
     function testDeployTwiceKeepsRevenueRouterAsRewardsDistribution() public {
-        CoinDAOFactory.Deployment memory first = factory.deploy(_params(1_000, CoinDAOFactory.StakingTokenChoice.Coin));
-        CoinDAOFactory.Deployment memory second = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.SCoin));
+        CoinDAOFactory.Deployment memory first = _deploy(1_000, CoinDAOFactory.StakingTokenChoice.Coin);
+        CoinDAOFactory.Deployment memory second = _deploy(0, CoinDAOFactory.StakingTokenChoice.SCoin);
 
         assertEq(StakedGovToken(first.staker).rewardsDistribution(), first.revenueRouter);
         assertEq(StakedGovToken(second.staker).rewardsDistribution(), second.revenueRouter);
     }
 
     function testCoinStakingFunderReleasesSecondTranchePermissionlessly() public {
-        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
         GovToken govToken = GovToken(deployment.govToken);
         StakingRewards rewards = StakingRewards(deployment.coinStakingRewards);
         StakingRewardsFunder rewardsFunder = StakingRewardsFunder(deployment.coinStakingRewardsFunder);
@@ -290,7 +425,7 @@ contract CoinDAOFactoryTest is Test {
     }
 
     function testRouterDistributesRevenueToStakerByDefault() public {
-        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
         MockMonolithLender lender = MockMonolithLender(deployment.lender);
         address newManager = address(0xBEEF);
 
@@ -308,7 +443,7 @@ contract CoinDAOFactoryTest is Test {
     }
 
     function testStakerEarnsCoinRevenueAndPreservesVotes() public {
-        CoinDAOFactory.Deployment memory deployment = factory.deploy(_params(0, CoinDAOFactory.StakingTokenChoice.Coin));
+        CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
         address alice = address(0xA11CE);
         deal(deployment.govToken, alice, 100 ether, true);
 
@@ -336,14 +471,51 @@ contract CoinDAOFactoryTest is Test {
         assertApproxEqAbs(IERC20(deployment.coin).balanceOf(alice), 30 ether, 1e12);
     }
 
-    function _params(uint16 deployerStakeBps, CoinDAOFactory.StakingTokenChoice stakingTokenChoice)
+    function _deploy(uint16 deployerStakeBps, CoinDAOFactory.StakingTokenChoice stakingTokenChoice)
+        internal
+        returns (CoinDAOFactory.Deployment memory)
+    {
+        return factory.deploy(_govParams(deployerStakeBps, stakingTokenChoice), _monolithParams(), manager);
+    }
+
+    function _deployExistingMarket(address operator_, address manager_)
+        internal
+        returns (address lender, address coin, address vault)
+    {
+        IMonolithFactory.DeployParams memory monolithParams = _monolithParams();
+        monolithParams.operator = operator_;
+        monolithParams.manager = manager_;
+        return monolithFactory.deploy(monolithParams);
+    }
+
+    function _govParams(uint16 deployerStakeBps, CoinDAOFactory.StakingTokenChoice stakingTokenChoice)
         internal
         view
-        returns (CoinDAOFactory.LaunchParams memory params)
+        returns (CoinDAOFactory.GovLaunchParams memory params)
     {
         params.govTokenName = "Example GOV";
         params.govTokenSymbol = "xGOV";
-        params.monolithParams = IMonolithFactory.DeployParams({
+        params.deployerStakeBps = deployerStakeBps;
+        params.deployerRecipient = deployerStakeBps == 0 ? address(0) : deployerRecipient;
+        params.monolithRecipient = monolithRecipient;
+        params.stakingTokenChoice = stakingTokenChoice;
+    }
+
+    function _existingGovParams(uint16 deployerStakeBps, CoinDAOFactory.StakingTokenChoice stakingTokenChoice)
+        internal
+        view
+        returns (CoinDAOFactory.GovLaunchParams memory params)
+    {
+        params.govTokenName = "Existing GOV";
+        params.govTokenSymbol = "eGOV";
+        params.deployerStakeBps = deployerStakeBps;
+        params.deployerRecipient = deployerStakeBps == 0 ? address(0) : deployerRecipient;
+        params.monolithRecipient = monolithRecipient;
+        params.stakingTokenChoice = stakingTokenChoice;
+    }
+
+    function _monolithParams() internal pure returns (IMonolithFactory.DeployParams memory params) {
+        params = IMonolithFactory.DeployParams({
             name: "Example Coin",
             symbol: "xUSD",
             collateral: address(0x2001),
@@ -363,11 +535,6 @@ contract CoinDAOFactoryTest is Test {
             maxBorrowDeltaBps: 0,
             psmVaultMinTotalSupply: 0
         });
-        params.deployerStakeBps = deployerStakeBps;
-        params.deployerRecipient = deployerStakeBps == 0 ? address(0) : deployerRecipient;
-        params.monolithRecipient = monolithRecipient;
-        params.manager = manager;
-        params.stakingTokenChoice = stakingTokenChoice;
     }
 
     function _passAndQueueQuorumProposal(

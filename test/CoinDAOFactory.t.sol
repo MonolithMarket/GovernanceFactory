@@ -32,12 +32,17 @@ contract CoinDAOFactoryTest is Test {
 
     function setUp() public {
         monolithFactory = new MockMonolithFactory();
-        factory = new CoinDAOFactory(IMonolithFactory(address(monolithFactory)));
+        factory = new CoinDAOFactory(IMonolithFactory(address(monolithFactory)), monolithRecipient);
     }
 
     function testConstructorRejectsZeroMonolithFactory() public {
         vm.expectRevert(CoinDAOFactory.ZeroAddress.selector);
-        new CoinDAOFactory(IMonolithFactory(address(0)));
+        new CoinDAOFactory(IMonolithFactory(address(0)), monolithRecipient);
+    }
+
+    function testConstructorRejectsZeroMonolithTreasury() public {
+        vm.expectRevert(CoinDAOFactory.ZeroAddress.selector);
+        new CoinDAOFactory(IMonolithFactory(address(monolithFactory)), address(0));
     }
 
     function testAllocationForZeroDeployerStake() public view {
@@ -132,6 +137,7 @@ contract CoinDAOFactoryTest is Test {
         assertEq(Ownable(deployment.revenueRouter).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.treasuryVesting)).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.monolithVesting)).owner(), monolithRecipient);
+        assertEq(factory.monolithTreasury(), monolithRecipient);
         assertEq(VestingWallet(payable(deployment.deployerVesting)).owner(), deployerRecipient);
         assertEq(RevenueRouter(deployment.revenueRouter).govStakingBps(), 10_000);
         assertFalse(TimelockController(payable(deployment.timelock)).hasRole(bytes32(0), address(factory)));
@@ -497,7 +503,6 @@ contract CoinDAOFactoryTest is Test {
         params.govTokenSymbol = "xGOV";
         params.deployerStakeBps = deployerStakeBps;
         params.deployerRecipient = deployerStakeBps == 0 ? address(0) : deployerRecipient;
-        params.monolithRecipient = monolithRecipient;
         params.stakingTokenChoice = stakingTokenChoice;
     }
 
@@ -510,7 +515,6 @@ contract CoinDAOFactoryTest is Test {
         params.govTokenSymbol = "eGOV";
         params.deployerStakeBps = deployerStakeBps;
         params.deployerRecipient = deployerStakeBps == 0 ? address(0) : deployerRecipient;
-        params.monolithRecipient = monolithRecipient;
         params.stakingTokenChoice = stakingTokenChoice;
     }
 

@@ -42,6 +42,7 @@ contract CoinDAOFactory {
     uint256 public constant GOV_STAKING_REWARD_DURATION = 30 days;
 
     IMonolithFactory public immutable monolithFactory;
+    address public immutable monolithTreasury;
     uint256 private _nextCreateNonce = 1;
 
     enum StakingTokenChoice {
@@ -54,7 +55,6 @@ contract CoinDAOFactory {
         string govTokenSymbol;
         uint16 deployerStakeBps;
         address deployerRecipient;
-        address monolithRecipient;
         StakingTokenChoice stakingTokenChoice;
     }
 
@@ -111,9 +111,10 @@ contract CoinDAOFactory {
     error CallerNotLenderOperator(address caller, address operator);
     error FactoryNotPendingOperator(address pendingOperator);
 
-    constructor(IMonolithFactory monolithFactory_) {
-        if (address(monolithFactory_) == address(0)) revert ZeroAddress();
+    constructor(IMonolithFactory monolithFactory_, address monolithTreasury_) {
+        if (address(monolithFactory_) == address(0) || monolithTreasury_ == address(0)) revert ZeroAddress();
         monolithFactory = monolithFactory_;
+        monolithTreasury = monolithTreasury_;
     }
 
     function deploymentsLength() external view returns (uint256) {
@@ -280,9 +281,7 @@ contract CoinDAOFactory {
         _recordCreate();
         deployment.treasuryVesting = address(treasuryVesting);
         VestingWallet monolithVesting = VestingWallet(
-            payable(CoreDeploymentLib.deployVestingWallet(
-                    params.monolithRecipient, uint64(block.timestamp), FOUR_YEARS
-                ))
+            payable(CoreDeploymentLib.deployVestingWallet(monolithTreasury, uint64(block.timestamp), FOUR_YEARS))
         );
         _recordCreate();
         deployment.monolithVesting = address(monolithVesting);
@@ -332,7 +331,6 @@ contract CoinDAOFactory {
     }
 
     function _validate(GovLaunchParams calldata params) internal pure {
-        if (params.monolithRecipient == address(0)) revert ZeroAddress();
         if (params.deployerStakeBps > MAX_DEPLOYER_STAKE_BPS) {
             revert DeployerStakeExceedsMaximum(params.deployerStakeBps);
         }

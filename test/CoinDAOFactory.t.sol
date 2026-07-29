@@ -134,6 +134,7 @@ contract CoinDAOFactoryTest is Test {
         assertEq(governor.quorum(block.number), factory.GOVERNOR_QUORUM());
         assertEq(staker.rewardsDistribution(), deployment.revenueRouter);
         assertEq(staker.rewardsDuration(), factory.GOV_STAKING_REWARD_DURATION());
+        assertEq(factory.GOV_STAKING_REWARD_DURATION(), 7 days);
         assertEq(Ownable(deployment.revenueRouter).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.treasuryVesting)).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.monolithVesting)).owner(), monolithRecipient);
@@ -470,11 +471,24 @@ contract CoinDAOFactoryTest is Test {
         // Revenue routed to the staker streams to the sole staker over the reward duration.
         deal(deployment.coin, deployment.revenueRouter, 30 ether, true);
         RevenueRouter(deployment.revenueRouter).distribute();
+        uint256 finish = staker.periodFinish();
 
-        vm.warp(block.timestamp + 30 days);
+        // A live-period distribution still pulls reserves, but queues the
+        // staking allocation instead of extending the current period.
+        vm.warp(block.timestamp + 1 days);
+        MockMonolithLender(deployment.lender).setAccruedLocalReserves(7 ether);
+        RevenueRouter(deployment.revenueRouter).distribute();
+
+        assertEq(MockMonolithLender(deployment.lender).accruedLocalReserves(), 0);
+        assertEq(staker.queuedRewards(), 7 ether);
+        assertEq(staker.periodFinish(), finish);
+
+        vm.warp(finish);
         vm.prank(alice);
         staker.getReward();
         assertApproxEqAbs(IERC20(deployment.coin).balanceOf(alice), 30 ether, 1e12);
+        assertEq(staker.queuedRewards(), 0);
+        assertEq(staker.periodFinish(), block.timestamp + 7 days);
     }
 
     function _deploy(uint16 deployerStakeBps, CoinDAOFactory.StakingTokenChoice stakingTokenChoice)

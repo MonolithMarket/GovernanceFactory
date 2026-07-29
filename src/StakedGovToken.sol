@@ -70,7 +70,8 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
         _;
     }
 
-    // Identical to Synthetix original reward accounting modifier.
+    // Diff: Extends Synthetix reward accounting by starting an eligible queued
+    // period after reward-related state changes complete.
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
         lastUpdateTime = lastTimeRewardApplicable();
@@ -79,6 +80,7 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
         }
         _;
+        _startQueuedRewardsIfReady();
     }
 
     // OpenZeppelin wrapper override; not present in Synthetix original.
@@ -87,8 +89,8 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
     }
 
     // Diff: Replaces Synthetix stake(). Mints a non-transferable voting receipt token
-    // through ERC20Wrapper and directly starts queued rewards once supply exists and no
-    // reward period is active.
+    // through ERC20Wrapper. The updateReward modifier starts queued rewards once
+    // supply exists and no reward period is active.
     // Must be implemented for OZ ERC20Wrapper
     function depositFor(address account, uint256 value)
         public
@@ -97,13 +99,7 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
         updateReward(account)
         returns (bool)
     {
-        bool success = super.depositFor(account, value);
-        if (queuedRewards != 0 && totalSupply() != 0 && block.timestamp >= periodFinish) {
-            uint256 reward = queuedRewards;
-            queuedRewards = 0;
-            _startReward(reward);
-        }
-        return success;
+        return super.depositFor(account, value);
     }
 
     // Diff: Replaces Synthetix withdraw(). Burns the wrapped voting receipt token and
@@ -176,29 +172,28 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
         }
     }
 
-    // Diff: rewardsDistribution is immutable, and rewards queue while no one is staked.
-    function notifyRewardAmount(uint256 reward) external onlyRewardsDistribution updateReward(address(0)) {
-        if (totalSupply() == 0) {
-            queuedRewards += reward;
-            emit RewardQueued(reward);
-            return;
-        }
+    /// @notice Starts queued rewards once the current period has finished and staked supply exists.
+    /// @dev Permissionless and safe to call when no queued period is eligible to start.
+    function startQueuedRewards() external nonReentrant {
+        if (queuedRewards == 0 || totalSupply() == 0 || block.timestamp < periodFinish) return;
 
-        reward += queuedRewards;
-        queuedRewards = 0;
-        _startReward(reward);
+        rewardPerTokenStored = rewardPerToken();
+        lastUpdateTime = lastTimeRewardApplicable();
+        _startQueuedRewardsIfReady();
     }
 
-    // Diff: Extracts Synthetix notifyRewardAmount rate setup into an internal helper,
-    // preserving leftover reward rollover while queueing rewards that would round to
-    // a zero rate.
-    function _startReward(uint256 reward) internal {
-        uint256 rewardToDistribute = reward;
-        if (block.timestamp < periodFinish) {
-            rewardToDistribute += (periodFinish - block.timestamp) * rewardRate;
-        }
+    // Diff: rewardsDistribution is immutable, and rewards queue while no one is
+    // staked or while an existing reward period is active.
+    function notifyRewardAmount(uint256 reward) external onlyRewardsDistribution updateReward(address(0)) {
+        bool isQueued = totalSupply() == 0 || block.timestamp < periodFinish;
+        queuedRewards += reward;
+        if (isQueued) emit RewardQueued(reward);
+    }
 
-        uint256 newRewardRate = rewardToDistribute / rewardsDuration;
+    // Diff: Starts a fresh reward period while queueing rewards that would round
+    // to a zero rate or fail the balance guard.
+    function _startReward(uint256 reward) internal {
+        uint256 newRewardRate = reward / rewardsDuration;
         if (newRewardRate == 0) {
             queuedRewards += reward;
             emit RewardQueued(reward);
@@ -215,6 +210,14 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + rewardsDuration;
         emit RewardAdded(reward);
+    }
+
+    function _startQueuedRewardsIfReady() internal {
+        if (queuedRewards == 0 || totalSupply() == 0 || block.timestamp < periodFinish) return;
+
+        uint256 reward = queuedRewards;
+        queuedRewards = 0;
+        _startReward(reward);
     }
 
     // Diff: New OpenZeppelin token hook with no Synthetix equivalent; allows mint/burn

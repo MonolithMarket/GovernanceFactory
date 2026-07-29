@@ -39,7 +39,7 @@ contract CoinDAOFactory {
     uint64 public constant FOUR_YEARS = 365 days * 4;
     uint256 public constant DEFAULT_TIMELOCK_DELAY = 2 days;
     uint256 public constant COIN_STAKING_REWARD_DURATION = 365 days;
-    uint256 public constant GOV_STAKING_REWARD_DURATION = 30 days;
+    uint256 public constant GOV_STAKING_REWARD_DURATION = 7 days;
 
     IMonolithFactory public immutable monolithFactory;
     address public immutable monolithTreasury;

@@ -68,10 +68,10 @@ CoinStakingRewards is the main bootstrap mechanism. It should be deployed by def
 
 | Year | % of CoinStakingRewards reserve | % of total GovToken supply |
 | :---- | :---- | :---- |
-| Year 1 | 35.0% | `22.75% * scale` |
-| Year 2 | 30.0% | `19.50% * scale` |
+| Year 1 | 32.5% | `21.125% * scale` |
+| Year 2 | 27.5% | `17.875% * scale` |
 | Year 3 | 22.5% | `14.625% * scale` |
-| Year 4 | 12.5% | `8.125% * scale` |
+| Year 4 | 17.5% | `11.375% * scale` |
 
 Implementation note: this should be a preset emissions schedule, not notifyRewardAmount-style revenue streaming. If no staking token is staked, rewards should not be allocated to any user. The simplest acceptable handling is that unallocated rewards remain in the rewards contract and are either rolled forward by the emissions logic or recoverable by governance at the end of the program.
 

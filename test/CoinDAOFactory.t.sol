@@ -48,14 +48,12 @@ contract CoinDAOFactoryTest is Test {
     function testAllocationForZeroDeployerStake() public view {
         uint256 supply = factory.GOV_TOKEN_SUPPLY();
         CoinDAOFactory.AllocationAmounts memory allocation = factory.allocationFor(0);
-        uint256 remainingAllocation = supply - allocation.monolithVesting - allocation.deployerVesting;
-        uint256 treasuryAllocation = remainingAllocation - allocation.coinStakingRewards;
 
         assertEq(allocation.monolithVesting, (supply * 200) / 10_000);
         assertEq(allocation.deployerVesting, 0);
-        assertEq(allocation.coinStakingRewards, (remainingAllocation * 6_666) / 10_000);
-        assertEq(allocation.immediateTreasuryAllocation, (treasuryAllocation * 1_000) / 10_000);
-        assertEq(allocation.treasuryVested, treasuryAllocation - allocation.immediateTreasuryAllocation);
+        assertEq(allocation.coinStakingRewards, (supply * 6_500) / 10_000);
+        assertEq(allocation.immediateTreasuryAllocation, (supply * 500) / 10_000);
+        assertEq(allocation.treasuryVested, (supply * 2_800) / 10_000);
         assertEq(_sum(allocation), supply);
     }
 
@@ -63,13 +61,42 @@ contract CoinDAOFactoryTest is Test {
         uint256 supply = factory.GOV_TOKEN_SUPPLY();
         CoinDAOFactory.AllocationAmounts memory allocation = factory.allocationFor(2_000);
         uint256 remainingAllocation = supply - allocation.monolithVesting - allocation.deployerVesting;
-        uint256 treasuryAllocation = remainingAllocation - allocation.coinStakingRewards;
 
         assertEq(allocation.monolithVesting, (supply * 200) / 10_000);
         assertEq(allocation.deployerVesting, (supply * 2_000) / 10_000);
-        assertEq(allocation.coinStakingRewards, (remainingAllocation * 6_666) / 10_000);
-        assertEq(allocation.immediateTreasuryAllocation, (treasuryAllocation * 1_000) / 10_000);
-        assertEq(allocation.treasuryVested, treasuryAllocation - allocation.immediateTreasuryAllocation);
+        assertEq(allocation.coinStakingRewards, (remainingAllocation * 6_500) / 9_800);
+        assertEq(allocation.immediateTreasuryAllocation, (remainingAllocation * 500) / 9_800);
+        assertEq(
+            allocation.treasuryVested,
+            remainingAllocation - allocation.coinStakingRewards - allocation.immediateTreasuryAllocation
+        );
+        assertEq(_sum(allocation), supply);
+    }
+
+    function testFuzzAllocationForValidDeployerStake(uint16 deployerStakeBps_) public view {
+        uint16 deployerStakeBps = uint16(bound(deployerStakeBps_, 0, factory.MAX_DEPLOYER_STAKE_BPS()));
+        uint256 supply = factory.GOV_TOKEN_SUPPLY();
+        uint256 expectedMonolithVesting = (supply * 200) / 10_000;
+        uint256 expectedDeployerVesting = (supply * deployerStakeBps) / 10_000;
+        uint256 remainingAllocation = supply - expectedMonolithVesting - expectedDeployerVesting;
+        uint256 expectedCoinStakingRewards = (remainingAllocation * 6_500) / 9_800;
+        uint256 expectedImmediateTreasury = (remainingAllocation * 500) / 9_800;
+
+        CoinDAOFactory.AllocationAmounts memory allocation = factory.allocationFor(deployerStakeBps);
+
+        assertEq(factory.ALLOCATION_WEIGHT_TOTAL(), 9_800);
+        assertEq(
+            factory.COIN_STAKING_REWARDS_WEIGHT() + factory.IMMEDIATE_TREASURY_WEIGHT()
+                + factory.VESTED_TREASURY_WEIGHT(),
+            factory.ALLOCATION_WEIGHT_TOTAL()
+        );
+        assertEq(allocation.monolithVesting, expectedMonolithVesting);
+        assertEq(allocation.deployerVesting, expectedDeployerVesting);
+        assertEq(allocation.coinStakingRewards, expectedCoinStakingRewards);
+        assertEq(allocation.immediateTreasuryAllocation, expectedImmediateTreasury);
+        assertEq(
+            allocation.treasuryVested, remainingAllocation - expectedCoinStakingRewards - expectedImmediateTreasury
+        );
         assertEq(_sum(allocation), supply);
     }
 
@@ -316,9 +343,18 @@ contract CoinDAOFactoryTest is Test {
         CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
         CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
         StakedGovToken staker = StakedGovToken(deployment.staker);
+        address proposer = address(0xA11CE);
         address lowQuorumVoter = address(0xB0B);
         uint256 oldQuorum = governor.quorum(block.number);
         uint256 newQuorum = oldQuorum / 2;
+
+        uint256 proposalThreshold = governor.proposalThreshold();
+        deal(deployment.govToken, proposer, proposalThreshold, true);
+        vm.startPrank(proposer);
+        IERC20(deployment.govToken).approve(deployment.staker, proposalThreshold);
+        staker.depositFor(proposer, proposalThreshold);
+        staker.delegate(proposer);
+        vm.stopPrank();
 
         deal(deployment.govToken, lowQuorumVoter, newQuorum, true);
         vm.startPrank(lowQuorumVoter);
@@ -335,7 +371,7 @@ contract CoinDAOFactoryTest is Test {
         defeatedCalldatas[0] = abi.encodeCall(governor.setQuorum, (newQuorum));
         string memory defeatedDescription = "Proposal below the original quorum";
 
-        vm.prank(lowQuorumVoter);
+        vm.prank(proposer);
         uint256 defeatedProposalId =
             governor.propose(defeatedTargets, defeatedValues, defeatedCalldatas, defeatedDescription);
         uint256 defeatedSnapshot = governor.proposalSnapshot(defeatedProposalId);

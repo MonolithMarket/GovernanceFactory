@@ -29,8 +29,10 @@ contract CoinDAOFactory {
     uint16 public constant BPS = 10_000;
     uint16 public constant MAX_DEPLOYER_STAKE_BPS = 2_000;
     uint16 public constant MONOLITH_BPS = 200;
-    uint16 public constant IMMEDIATE_TREASURY_ALLOCATION = 1_000;
-    uint16 public constant BASE_REWARDS_BPS = 6_666;
+    uint16 public constant ALLOCATION_WEIGHT_TOTAL = 9_800;
+    uint16 public constant COIN_STAKING_REWARDS_WEIGHT = 6_500;
+    uint16 public constant IMMEDIATE_TREASURY_WEIGHT = 500;
+    uint16 public constant VESTED_TREASURY_WEIGHT = 2_800;
     uint16 public constant DEFAULT_GOV_STAKING_BPS = 10_000;
     uint256 public constant GOV_TOKEN_SUPPLY = FIXED_GOV_TOKEN_SUPPLY;
     uint256 public constant GOVERNOR_PROPOSAL_THRESHOLD = GOV_TOKEN_SUPPLY / 1_000;
@@ -128,11 +130,13 @@ contract CoinDAOFactory {
         allocation.monolithVesting = (totalSupply * MONOLITH_BPS) / uint256(BPS);
         allocation.deployerVesting = (totalSupply * deployerStakeBps) / uint256(BPS);
         uint256 remainingAllocation = totalSupply - allocation.monolithVesting - allocation.deployerVesting;
-        allocation.coinStakingRewards = (remainingAllocation * BASE_REWARDS_BPS) / uint256(BPS);
-        uint256 treasuryAllocation = remainingAllocation - allocation.coinStakingRewards;
+        allocation.coinStakingRewards =
+            (remainingAllocation * COIN_STAKING_REWARDS_WEIGHT) / uint256(ALLOCATION_WEIGHT_TOTAL);
         allocation.immediateTreasuryAllocation =
-            treasuryAllocation * uint256(IMMEDIATE_TREASURY_ALLOCATION) / uint256(BPS);
-        allocation.treasuryVested = treasuryAllocation - allocation.immediateTreasuryAllocation;
+            (remainingAllocation * IMMEDIATE_TREASURY_WEIGHT) / uint256(ALLOCATION_WEIGHT_TOTAL);
+        // Assign all division dust to the vested treasury so the fixed supply is fully allocated.
+        allocation.treasuryVested =
+            remainingAllocation - allocation.coinStakingRewards - allocation.immediateTreasuryAllocation;
     }
 
     function deploy(

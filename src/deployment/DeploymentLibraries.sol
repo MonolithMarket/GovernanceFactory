@@ -44,11 +44,11 @@ library StakingDeploymentLib {
         IERC20 rewardsToken_,
         string calldata name_,
         string calldata symbol_,
-        address rewardsDistribution_,
+        address initialRewardsDistribution_,
         uint256 rewardsDuration_
     ) external returns (address) {
         return address(
-            new StakedGovToken(govToken_, rewardsToken_, name_, symbol_, rewardsDistribution_, rewardsDuration_)
+            new StakedGovToken(govToken_, rewardsToken_, name_, symbol_, initialRewardsDistribution_, rewardsDuration_)
         );
     }
 

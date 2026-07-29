@@ -23,8 +23,9 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
     uint256 public constant REWARD_PRECISION = 1e18;
 
     IERC20 public immutable rewardsToken;
-    address public immutable rewardsDistribution;
+    address public rewardsDistribution;
     uint256 public immutable rewardsDuration;
+    bool private _rewardsDistributionFinalized;
 
     uint256 public periodFinish;
     uint256 public rewardRate;
@@ -38,36 +39,56 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
     event RewardAdded(uint256 reward);
     event RewardQueued(uint256 reward);
     event RewardPaid(address indexed account, uint256 reward);
+    event RewardsDistributionFinalized(
+        address indexed initialRewardsDistribution, address indexed finalRewardsDistribution
+    );
 
     error ZeroAddress();
     error InvalidRewardAmount();
+    error InvalidRewardsDistribution(address rewardsDistribution);
     error NonTransferable();
+    error RewardsDistributionAlreadyFinalized();
 
     // Diff: Replaces Synthetix's plain staking token balance ledger with an ERC20Wrapper
     // receipt token that also supports Permit and Votes. The rewardsDistribution address
-    // is immutable instead of owner-managed.
+    // can be finalized once instead of remaining owner-managed.
     constructor(
         IERC20 govToken_,
         IERC20 rewardsToken_,
         string memory name_,
         string memory symbol_,
-        address rewardsDistribution_,
+        address initialRewardsDistribution_,
         uint256 rewardsDuration_
     ) ERC20(name_, symbol_) ERC20Permit(name_) ERC20Wrapper(govToken_) {
         if (address(govToken_) == address(0)) revert ZeroAddress();
         if (address(rewardsToken_) == address(0)) revert ZeroAddress();
-        if (rewardsDistribution_ == address(0)) revert ZeroAddress();
+        if (initialRewardsDistribution_ == address(0)) revert ZeroAddress();
         if (rewardsDuration_ == 0) revert InvalidRewardAmount();
 
         rewardsToken = rewardsToken_;
-        rewardsDistribution = rewardsDistribution_;
+        rewardsDistribution = initialRewardsDistribution_;
         rewardsDuration = rewardsDuration_;
     }
 
-    // Functionally identical to Synthetix original, with immutable rewardsDistribution.
+    // Functionally identical to Synthetix original, with one-time-finalized rewardsDistribution.
     modifier onlyRewardsDistribution() {
         require(msg.sender == rewardsDistribution, "Caller is not RewardsDistribution contract");
         _;
+    }
+
+    /// @notice Permanently hands reward notification authority to its final distributor.
+    /// @dev The current distributor may call this exactly once.
+    function finalizeRewardsDistribution(address finalRewardsDistribution) external onlyRewardsDistribution {
+        if (_rewardsDistributionFinalized) revert RewardsDistributionAlreadyFinalized();
+        if (finalRewardsDistribution == address(0)) revert ZeroAddress();
+        if (finalRewardsDistribution == rewardsDistribution) {
+            revert InvalidRewardsDistribution(finalRewardsDistribution);
+        }
+
+        address initialRewardsDistribution = rewardsDistribution;
+        rewardsDistribution = finalRewardsDistribution;
+        _rewardsDistributionFinalized = true;
+        emit RewardsDistributionFinalized(initialRewardsDistribution, finalRewardsDistribution);
     }
 
     // Diff: Extends Synthetix reward accounting by starting an eligible queued
@@ -182,8 +203,8 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
         _startQueuedRewardsIfReady();
     }
 
-    // Diff: rewardsDistribution is immutable, and rewards queue while no one is
-    // staked or while an existing reward period is active.
+    // Diff: rewardsDistribution is finalized once, and rewards queue while no
+    // one is staked or while an existing reward period is active.
     function notifyRewardAmount(uint256 reward) external onlyRewardsDistribution updateReward(address(0)) {
         bool isQueued = totalSupply() == 0 || block.timestamp < periodFinish;
         queuedRewards += reward;

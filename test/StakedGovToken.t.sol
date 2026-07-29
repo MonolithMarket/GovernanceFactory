@@ -9,6 +9,10 @@ import {StakedGovToken} from "../src/StakedGovToken.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 contract StakedGovTokenTest is Test {
+    event RewardsDistributionFinalized(
+        address indexed initialRewardsDistribution, address indexed finalRewardsDistribution
+    );
+
     uint256 internal constant REWARDS_DURATION = 7 days;
 
     GovToken internal gov;
@@ -73,6 +77,43 @@ contract StakedGovTokenTest is Test {
         vm.prank(alice);
         vm.expectRevert(bytes("Caller is not RewardsDistribution contract"));
         staker.notifyRewardAmount(30 ether);
+    }
+
+    function testRewardsDistributionCanBeFinalizedOnce() public {
+        vm.expectEmit(true, true, false, true, address(staker));
+        emit RewardsDistributionFinalized(address(this), bob);
+        staker.finalizeRewardsDistribution(bob);
+
+        assertEq(staker.rewardsDistribution(), bob);
+
+        reward.mint(address(staker), 30 ether);
+        vm.expectRevert(bytes("Caller is not RewardsDistribution contract"));
+        staker.notifyRewardAmount(30 ether);
+
+        vm.prank(bob);
+        staker.notifyRewardAmount(30 ether);
+        assertEq(staker.queuedRewards(), 30 ether);
+
+        vm.expectRevert(StakedGovToken.RewardsDistributionAlreadyFinalized.selector);
+        vm.prank(bob);
+        staker.finalizeRewardsDistribution(alice);
+    }
+
+    function testOnlyCurrentRewardsDistributionCanFinalize() public {
+        vm.expectRevert(bytes("Caller is not RewardsDistribution contract"));
+        vm.prank(alice);
+        staker.finalizeRewardsDistribution(bob);
+    }
+
+    function testFinalRewardsDistributionMustBeNewAndNonzero() public {
+        vm.expectRevert(StakedGovToken.ZeroAddress.selector);
+        staker.finalizeRewardsDistribution(address(0));
+
+        address currentRewardsDistribution = staker.rewardsDistribution();
+        vm.expectRevert(
+            abi.encodeWithSelector(StakedGovToken.InvalidRewardsDistribution.selector, currentRewardsDistribution)
+        );
+        staker.finalizeRewardsDistribution(currentRewardsDistribution);
     }
 
     function testRewardsQueueUntilFirstStake() public {

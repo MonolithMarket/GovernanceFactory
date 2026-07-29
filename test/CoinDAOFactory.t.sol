@@ -106,22 +106,10 @@ contract CoinDAOFactoryTest is Test {
     }
 
     function testDeployWiresCoinStakingLaunch() public {
-        uint256 firstCreateNonce = vm.getNonce(address(factory));
         CoinDAOFactory.Deployment memory deployment = _deploy(1_000, CoinDAOFactory.StakingTokenChoice.Coin);
         CoinDAOFactory.AllocationAmounts memory allocation = factory.allocationFor(1_000);
 
-        // Linked deployment libraries use DELEGATECALL, so every CREATE must still
-        // originate from the factory and preserve its nonce-based address sequence.
-        assertEq(deployment.govToken, vm.computeCreateAddress(address(factory), firstCreateNonce));
-        assertEq(deployment.timelock, vm.computeCreateAddress(address(factory), firstCreateNonce + 1));
-        assertEq(deployment.staker, vm.computeCreateAddress(address(factory), firstCreateNonce + 2));
-        assertEq(deployment.revenueRouter, vm.computeCreateAddress(address(factory), firstCreateNonce + 3));
-        assertEq(deployment.governor, vm.computeCreateAddress(address(factory), firstCreateNonce + 4));
-        assertEq(deployment.coinStakingRewards, vm.computeCreateAddress(address(factory), firstCreateNonce + 5));
-        assertEq(deployment.coinStakingRewardsFunder, vm.computeCreateAddress(address(factory), firstCreateNonce + 6));
-        assertEq(deployment.treasuryVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 7));
-        assertEq(deployment.monolithVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 8));
-        assertEq(deployment.deployerVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 9));
+        _assertDeploymentContractsHaveCode(deployment);
 
         assertEq(factory.deploymentsLength(), 1);
         assertTrue(factory.hasCoinDAO(deployment.lender));
@@ -187,25 +175,15 @@ contract CoinDAOFactoryTest is Test {
         vm.prank(existingOperator);
         lender.setPendingOperator(address(factory));
 
-        uint256 firstCreateNonce = vm.getNonce(address(factory));
         vm.prank(existingOperator);
         CoinDAOFactory.Deployment memory deployment = factory.deployForExistingCoin(govParams, lenderAddress);
         CoinDAOFactory.AllocationAmounts memory allocation = factory.allocationFor(govParams.deployerStakeBps);
 
+        _assertDeploymentContractsHaveCode(deployment);
         assertEq(deployment.lender, lenderAddress);
         assertEq(deployment.coin, coin);
         assertEq(deployment.vault, vault);
         assertEq(deployment.stakingToken, coin);
-        assertEq(deployment.govToken, vm.computeCreateAddress(address(factory), firstCreateNonce));
-        assertEq(deployment.timelock, vm.computeCreateAddress(address(factory), firstCreateNonce + 1));
-        assertEq(deployment.staker, vm.computeCreateAddress(address(factory), firstCreateNonce + 2));
-        assertEq(deployment.revenueRouter, vm.computeCreateAddress(address(factory), firstCreateNonce + 3));
-        assertEq(deployment.governor, vm.computeCreateAddress(address(factory), firstCreateNonce + 4));
-        assertEq(deployment.coinStakingRewards, vm.computeCreateAddress(address(factory), firstCreateNonce + 5));
-        assertEq(deployment.coinStakingRewardsFunder, vm.computeCreateAddress(address(factory), firstCreateNonce + 6));
-        assertEq(deployment.treasuryVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 7));
-        assertEq(deployment.monolithVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 8));
-        assertEq(deployment.deployerVesting, vm.computeCreateAddress(address(factory), firstCreateNonce + 9));
 
         assertEq(factory.deploymentsLength(), 1);
         assertTrue(factory.hasCoinDAO(lenderAddress));
@@ -445,6 +423,10 @@ contract CoinDAOFactoryTest is Test {
 
         assertEq(StakedGovToken(first.staker).rewardsDistribution(), first.revenueRouter);
         assertEq(StakedGovToken(second.staker).rewardsDistribution(), second.revenueRouter);
+
+        vm.expectRevert(StakedGovToken.RewardsDistributionAlreadyFinalized.selector);
+        vm.prank(first.revenueRouter);
+        StakedGovToken(first.staker).finalizeRewardsDistribution(second.revenueRouter);
     }
 
     function testCoinStakingFunderReleasesSecondTranchePermissionlessly() public {
@@ -631,5 +613,24 @@ contract CoinDAOFactoryTest is Test {
     function _sum(CoinDAOFactory.AllocationAmounts memory allocation) internal pure returns (uint256) {
         return allocation.coinStakingRewards + allocation.immediateTreasuryAllocation + allocation.treasuryVested
             + allocation.monolithVesting + allocation.deployerVesting;
+    }
+
+    function _assertDeploymentContractsHaveCode(CoinDAOFactory.Deployment memory deployment) internal view {
+        assertGt(deployment.govToken.code.length, 0);
+        assertGt(deployment.staker.code.length, 0);
+        assertGt(deployment.governor.code.length, 0);
+        assertGt(deployment.timelock.code.length, 0);
+        assertGt(deployment.lender.code.length, 0);
+        assertGt(deployment.coin.code.length, 0);
+        assertGt(deployment.vault.code.length, 0);
+        assertGt(deployment.stakingToken.code.length, 0);
+        assertGt(deployment.revenueRouter.code.length, 0);
+        assertGt(deployment.coinStakingRewards.code.length, 0);
+        assertGt(deployment.coinStakingRewardsFunder.code.length, 0);
+        assertGt(deployment.treasuryVesting.code.length, 0);
+        assertGt(deployment.monolithVesting.code.length, 0);
+        if (deployment.deployerVesting != address(0)) {
+            assertGt(deployment.deployerVesting.code.length, 0);
+        }
     }
 }

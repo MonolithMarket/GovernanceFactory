@@ -12,7 +12,6 @@ import {GOV_TOKEN_SUPPLY as FIXED_GOV_TOKEN_SUPPLY, GovToken} from "./GovToken.s
 import {RevenueRouter} from "./RevenueRouter.sol";
 import {StakedGovToken} from "./StakedGovToken.sol";
 import {StakingRewards} from "./StakingRewards.sol";
-import {StakingRewardsFunder} from "./StakingRewardsFunder.sol";
 import {
     CoreDeploymentLib,
     GovernorDeploymentLib,
@@ -76,7 +75,6 @@ contract CoinDAOFactory {
         address stakingToken;
         address revenueRouter;
         address coinStakingRewards;
-        address coinStakingRewardsFunder;
         address treasuryVesting;
         address monolithVesting;
         address deployerVesting;
@@ -96,8 +94,7 @@ contract CoinDAOFactory {
         address governor,
         address timelock,
         address revenueRouter,
-        address coinStakingRewards,
-        address coinStakingRewardsFunder
+        address coinStakingRewards
     );
     event CoinDAOAttached(uint256 indexed id, address indexed lender, address indexed previousOperator);
 
@@ -250,14 +247,10 @@ contract CoinDAOFactory {
         deployment.stakingToken = stakingToken;
         StakingRewards coinStakingRewards = StakingRewards(
             RewardsDeploymentLib.deployStakingRewards(
-                stakingToken, address(govToken), address(this), COIN_STAKING_REWARD_DURATION
+                stakingToken, address(govToken), allocation.coinStakingRewards, COIN_STAKING_REWARD_DURATION
             )
         );
         deployment.coinStakingRewards = address(coinStakingRewards);
-        StakingRewardsFunder coinStakingRewardsFunder = StakingRewardsFunder(
-            RewardsDeploymentLib.deployStakingRewardsFunder(coinStakingRewards, allocation.coinStakingRewards)
-        );
-        deployment.coinStakingRewardsFunder = address(coinStakingRewardsFunder);
 
         // Route lender revenue through the staker while leaving future management under timelock control.
         IMonolithLender(deployment.lender).setPendingOperator(deployment.revenueRouter);
@@ -284,10 +277,7 @@ contract CoinDAOFactory {
         }
 
         IERC20 govTokenErc20 = IERC20(address(govToken));
-        govTokenErc20.safeTransfer(address(coinStakingRewardsFunder), allocation.coinStakingRewards);
-        coinStakingRewards.setRewardsDistribution(address(coinStakingRewardsFunder));
-        coinStakingRewardsFunder.fundNextTranche();
-        coinStakingRewards.renounceOwnership();
+        govTokenErc20.safeTransfer(address(coinStakingRewards), allocation.coinStakingRewards);
 
         // Fund the remaining allocations; the treasury receives liquid GOV plus its vesting wallet.
         govTokenErc20.safeTransfer(address(timelock), allocation.immediateTreasuryAllocation);
@@ -310,8 +300,7 @@ contract CoinDAOFactory {
             deployment.governor,
             deployment.timelock,
             deployment.revenueRouter,
-            deployment.coinStakingRewards,
-            deployment.coinStakingRewardsFunder
+            deployment.coinStakingRewards
         );
 
         return deployment;

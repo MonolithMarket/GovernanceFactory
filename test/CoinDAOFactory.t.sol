@@ -14,7 +14,6 @@ import {GovToken} from "../src/GovToken.sol";
 import {RevenueRouter} from "../src/RevenueRouter.sol";
 import {StakedGovToken} from "../src/StakedGovToken.sol";
 import {StakingRewards} from "../src/StakingRewards.sol";
-import {StakingRewardsFunder} from "../src/StakingRewardsFunder.sol";
 import {IMonolithFactory} from "../src/interfaces/IMonolith.sol";
 import {MockMonolithFactory, MockMonolithLender} from "./mocks/MockMonolith.sol";
 
@@ -119,29 +118,21 @@ contract CoinDAOFactoryTest is Test {
         assertEq(MockMonolithLender(deployment.lender).manager(), manager);
 
         GovToken govToken = GovToken(deployment.govToken);
-        StakingRewardsFunder rewardsFunder = StakingRewardsFunder(deployment.coinStakingRewardsFunder);
-        uint256 firstTranche = rewardsFunder.trancheAmounts(0);
+        StakingRewards rewards = StakingRewards(deployment.coinStakingRewards);
 
         assertEq(govToken.totalSupply(), factory.GOV_TOKEN_SUPPLY());
-        assertEq(govToken.balanceOf(deployment.coinStakingRewards), firstTranche);
-        assertEq(govToken.balanceOf(deployment.coinStakingRewardsFunder), allocation.coinStakingRewards - firstTranche);
+        assertEq(govToken.balanceOf(deployment.coinStakingRewards), allocation.coinStakingRewards);
         assertEq(govToken.balanceOf(deployment.timelock), allocation.immediateTreasuryAllocation);
         assertEq(govToken.balanceOf(deployment.treasuryVesting), allocation.treasuryVested);
         assertEq(govToken.balanceOf(deployment.monolithVesting), allocation.monolithVesting);
         assertEq(govToken.balanceOf(deployment.deployerVesting), allocation.deployerVesting);
 
-        assertEq(Ownable(deployment.coinStakingRewards).owner(), address(0));
-        assertEq(
-            StakingRewards(deployment.coinStakingRewards).rewardsDistribution(), deployment.coinStakingRewardsFunder
-        );
-        assertEq(
-            StakingRewards(deployment.coinStakingRewards).rewardsDuration(), factory.COIN_STAKING_REWARD_DURATION()
-        );
+        assertEq(address(rewards.rewardsToken()), deployment.govToken);
+        assertEq(rewards.totalRewards(), allocation.coinStakingRewards);
+        assertEq(rewards.nextTranche(), 0);
+        assertEq(rewards.periodFinish(), 0);
+        assertEq(rewards.rewardsDuration(), factory.COIN_STAKING_REWARD_DURATION());
         assertEq(factory.COIN_STAKING_REWARD_DURATION(), 365 days);
-        assertEq(address(rewardsFunder.stakingRewards()), deployment.coinStakingRewards);
-        assertEq(address(rewardsFunder.rewardsToken()), deployment.govToken);
-        assertEq(rewardsFunder.totalRewards(), allocation.coinStakingRewards);
-        assertEq(rewardsFunder.nextTranche(), 1);
         CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
         StakedGovToken staker = StakedGovToken(deployment.staker);
 
@@ -429,24 +420,32 @@ contract CoinDAOFactoryTest is Test {
         StakedGovToken(first.staker).finalizeRewardsDistribution(second.revenueRouter);
     }
 
-    function testCoinStakingFunderReleasesSecondTranchePermissionlessly() public {
+    function testCoinStakingRewardsStartsOnFirstStakeAndAdvancesPermissionlessly() public {
         CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
         GovToken govToken = GovToken(deployment.govToken);
         StakingRewards rewards = StakingRewards(deployment.coinStakingRewards);
-        StakingRewardsFunder rewardsFunder = StakingRewardsFunder(deployment.coinStakingRewardsFunder);
+        address coinStaker = address(0x57A);
 
-        uint256 firstTranche = rewardsFunder.trancheAmounts(0);
-        uint256 secondTranche = rewardsFunder.trancheAmounts(1);
+        uint256 firstTranche = rewards.trancheAmount(0);
+        uint256 secondTranche = rewards.trancheAmount(1);
+
+        deal(deployment.stakingToken, coinStaker, 1 ether, true);
+        vm.startPrank(coinStaker);
+        IERC20(deployment.stakingToken).approve(address(rewards), 1 ether);
+        rewards.stake(1 ether);
+        vm.stopPrank();
+
+        assertEq(rewards.nextTranche(), 1);
+        assertEq(rewards.rewardRate(), firstTranche / rewards.rewardsDuration());
+        assertEq(govToken.balanceOf(address(rewards)), rewards.totalRewards());
 
         vm.warp(rewards.periodFinish());
         vm.prank(address(0xCA11));
-        rewardsFunder.fundNextTranche();
+        rewards.startNextTranche();
 
-        assertEq(rewardsFunder.nextTranche(), 2);
-        assertEq(govToken.balanceOf(address(rewards)), firstTranche + secondTranche);
-        assertEq(
-            govToken.balanceOf(address(rewardsFunder)), rewardsFunder.totalRewards() - firstTranche - secondTranche
-        );
+        assertEq(rewards.nextTranche(), 2);
+        assertEq(rewards.rewardRate(), secondTranche / rewards.rewardsDuration());
+        assertEq(govToken.balanceOf(address(rewards)), rewards.totalRewards());
     }
 
     function testRouterDistributesRevenueToStakerByDefault() public {
@@ -626,7 +625,6 @@ contract CoinDAOFactoryTest is Test {
         assertGt(deployment.stakingToken.code.length, 0);
         assertGt(deployment.revenueRouter.code.length, 0);
         assertGt(deployment.coinStakingRewards.code.length, 0);
-        assertGt(deployment.coinStakingRewardsFunder.code.length, 0);
         assertGt(deployment.treasuryVesting.code.length, 0);
         assertGt(deployment.monolithVesting.code.length, 0);
         if (deployment.deployerVesting != address(0)) {

@@ -11,7 +11,6 @@ import {GovToken} from "../GovToken.sol";
 import {RevenueRouter} from "../RevenueRouter.sol";
 import {StakedGovToken} from "../StakedGovToken.sol";
 import {StakingRewards} from "../StakingRewards.sol";
-import {StakingRewardsFunder} from "../StakingRewardsFunder.sol";
 
 /// @dev External library calls execute with DELEGATECALL, so contracts created
 /// here are created by the calling CoinDAOFactory rather than by the library.
@@ -80,16 +79,9 @@ library RewardsDeploymentLib {
     function deployStakingRewards(
         address stakingToken_,
         address rewardsToken_,
-        address initialOwner_,
+        uint256 totalRewards_,
         uint256 rewardsDuration_
     ) external returns (address) {
-        return address(new StakingRewards(stakingToken_, rewardsToken_, initialOwner_, rewardsDuration_));
-    }
-
-    function deployStakingRewardsFunder(StakingRewards stakingRewards_, uint256 totalRewards_)
-        external
-        returns (address)
-    {
-        return address(new StakingRewardsFunder(stakingRewards_, totalRewards_));
+        return address(new StakingRewards(stakingToken_, rewardsToken_, totalRewards_, rewardsDuration_));
     }
 }

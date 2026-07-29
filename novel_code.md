@@ -19,11 +19,10 @@ against by how much of it is original project logic versus reused library code. 
 | :-- | :-- | :-- | :-- |
 | `lib/openzeppelin-contracts` | Imported library | OpenZeppelin Contracts v5.6.1 | Version pin and integration assumptions |
 | `src/StakedGovToken.sol` | Adapted + standard composition | OZ ERC20Wrapper/ERC20Votes plus Synthetix reward accounting | Reward queueing, final-withdraw behavior, non-transferability |
-| `src/StakingRewards.sol` | Adapted | Synthetix `StakingRewards` | Solidity 0.8 port and intentionally removed hooks |
+| `src/StakingRewards.sol` | Adapted + Novel | Synthetix reward accounting plus fixed Monolith emission schedule | Reward accounting, tranche activation, and reserve solvency |
 | `src/GovToken.sol` | Standard composition | OZ ERC20 + ERC20Permit | Fixed supply and initial holder |
 | `src/CoinDAOGovernor.sol` | Standard composition | OZ Governor extensions | Absolute quorum/threshold parameters |
 | `src/RevenueRouter.sol` | Novel | Written for Monolith | Revenue split and Lender operator authority |
-| `src/StakingRewardsFunder.sol` | Novel | Written for Monolith | Tranche schedule and final balance sweep |
 | `src/CoinDAOFactory.sol` | Novel | Written for Monolith | Allocation math, deployment ordering, privilege handoff |
 | `src/interfaces/IMonolith.sol` | Novel interface only | Written for Monolith | ABI match against the external Monolith contracts |
 | `src/interfaces/INotifiableRewardReceiver.sol` | Interface only | Generic local interface | No runtime logic |
@@ -62,8 +61,15 @@ These additions are the main audit focus for this file.
 ### `src/StakingRewards.sol`
 
 Coin or sCoin stakers earn GOV emissions through a modernized Synthetix-style staking rewards
-contract. SafeMath is replaced by Solidity 0.8 checked arithmetic. Pause, token recovery, and
-mutable duration hooks are removed because the factory uses a fixed launch flow.
+contract. SafeMath is replaced by Solidity 0.8 checked arithmetic. External reward notification,
+pause, token recovery, and mutable duration hooks are removed because the factory uses a fixed
+launch flow.
+
+The contract also holds the complete four-year GOV reserve and starts the preset 32.5%, 27.5%,
+22.5%, and 17.5% annual tranches. The first successful stake starts tranche zero, so emissions do
+not begin while the staking supply is empty. Later tranches can be started permissionlessly after
+the preceding period finishes. The final tranche is the fixed reserve remainder after the first
+three rounded tranche amounts; it does not sweep unclaimed rewards or direct token donations.
 
 ## Standard Composition
 
@@ -80,7 +86,7 @@ GovernorTimelockControl. The project-specific behavior is parameterization:
 - Voting delay: 7,200 blocks.
 - Voting period: 36,000 blocks.
 - Proposal threshold: 0.1% of fixed GOV supply, supplied by the factory.
-- Initial quorum: 1% of fixed GOV supply, supplied by the factory.
+- Initial quorum: 0.1% of fixed GOV supply, supplied by the factory.
 
 The quorum is an absolute `sGOV` vote amount because `sGOV.totalSupply()` may be much lower than
 total GOV supply, and a fraction of staked supply would make quorum easier as participation falls.
@@ -107,13 +113,6 @@ treasury, and notifies the reward receiver after transferring rewards. It also e
 managed Lender manager replacement. The fund-routing and cross-contract authority should be
 audited closely.
 
-### `src/StakingRewardsFunder.sol`
-
-The funder releases GOV emissions into `StakingRewards` over four yearly tranches. The first
-three tranches are fixed percentages of total rewards, and the final tranche sweeps the remaining
-balance. The final balance sweep is correct for the factory path because the funder receives the
-full allocation up front and has no alternate token outflow.
-
 ### `src/interfaces/IMonolith.sol`
 
 These interfaces contain no runtime logic, but their selectors and parameter layouts must match
@@ -124,7 +123,6 @@ the external Monolith contracts exactly.
 1. `CoinDAOFactory.sol`: allocation math and privilege wiring.
 2. `StakedGovToken.sol`: reward queueing, non-transferability, and voting integration.
 3. `RevenueRouter.sol`: revenue split and Lender manager authority.
-4. `StakingRewardsFunder.sol`: tranche gating and final sweep.
-5. `StakingRewards.sol`: Synthetix port and removed hooks.
-6. `CoinDAOGovernor.sol` and `GovToken.sol`: parameter choices and governance assumptions.
-7. `IMonolith.sol`: ABI match against the external Monolith deployment.
+4. `StakingRewards.sol`: reward accounting, tranche gating, and reserve custody.
+5. `CoinDAOGovernor.sol` and `GovToken.sol`: parameter choices and governance assumptions.
+6. `IMonolith.sol`: ABI match against the external Monolith deployment.

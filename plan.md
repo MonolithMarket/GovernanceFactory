@@ -73,7 +73,10 @@ CoinStakingRewards is the main bootstrap mechanism. It should be deployed by def
 | Year 3 | 22.5% | `14.625% * scale` |
 | Year 4 | 17.5% | `11.375% * scale` |
 
-Implementation note: this should be a preset emissions schedule, not notifyRewardAmount-style revenue streaming. If no staking token is staked, rewards should not be allocated to any user. The simplest acceptable handling is that unallocated rewards remain in the rewards contract and are either rolled forward by the emissions logic or recoverable by governance at the end of the program.
+Implementation note: CoinStakingRewards holds the complete four-year reserve and uses a preset
+emissions schedule rather than notifyRewardAmount-style revenue streaming. The first successful
+stake starts year one, so rewards do not begin while staking supply is empty. Each later yearly
+tranche can be started permissionlessly after the previous period finishes.
 
 # **6\. GovStaking / stGOV**
 
@@ -144,7 +147,7 @@ Recommended cadence can remain simple: 1-day voting delay, 5-day voting period, 
 
 1. Read deployer stake `D`, enforce `0 <= D <= 20`, and compute `scale = (98 - D) / 98`.  
 2. Deploy GovToken with fixed supply.  
-3. Deploy CoinStakingRewards and fund it with `65% * scale` of supply.  
+3. Deploy CoinStakingRewards and fund it with the complete `65% * scale` four-year reserve. The first stake activates year one.
 4. Deploy GovStaking / stGOV.  
 5. Deploy Governor \+ Timelock using stGOV as the voting token.  
 6. Deploy Treasury and vesting contracts; fund `5% * scale` immediate treasury and `28% * scale` vested treasury.  

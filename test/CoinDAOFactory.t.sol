@@ -20,6 +20,8 @@ import {MockMonolithFactory, MockMonolithLender} from "./mocks/MockMonolith.sol"
 
 contract CoinDAOFactoryTest is Test {
     event QuorumSet(uint256 oldQuorum, uint256 newQuorum);
+    event MonolithBeneficiaryTransferStarted(address indexed currentBeneficiary, address indexed pendingBeneficiary);
+    event MonolithBeneficiaryTransferred(address indexed previousBeneficiary, address indexed newBeneficiary);
 
     CoinDAOFactory internal factory;
     MockMonolithFactory internal monolithFactory;
@@ -40,9 +42,96 @@ contract CoinDAOFactoryTest is Test {
         new CoinDAOFactory(IMonolithFactory(address(0)), monolithRecipient);
     }
 
-    function testConstructorRejectsZeroMonolithTreasury() public {
+    function testConstructorRejectsZeroMonolithBeneficiary() public {
         vm.expectRevert(CoinDAOFactory.ZeroAddress.selector);
         new CoinDAOFactory(IMonolithFactory(address(monolithFactory)), address(0));
+    }
+
+    function testMonolithBeneficiaryCanNominateAndReplacePendingBeneficiary() public {
+        address firstNominee = address(0xB001);
+        address secondNominee = address(0xB002);
+
+        vm.expectEmit(true, true, false, true, address(factory));
+        emit MonolithBeneficiaryTransferStarted(monolithRecipient, firstNominee);
+        vm.prank(monolithRecipient);
+        factory.setPendingMonolithBeneficiary(firstNominee);
+        assertEq(factory.pendingMonolithBeneficiary(), firstNominee);
+
+        vm.expectEmit(true, true, false, true, address(factory));
+        emit MonolithBeneficiaryTransferStarted(monolithRecipient, secondNominee);
+        vm.prank(monolithRecipient);
+        factory.setPendingMonolithBeneficiary(secondNominee);
+        assertEq(factory.pendingMonolithBeneficiary(), secondNominee);
+    }
+
+    function testSetPendingMonolithBeneficiaryRejectsUnauthorizedCallerAndZeroAddress() public {
+        address unauthorizedCaller = address(0xBAD);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CoinDAOFactory.CallerNotMonolithBeneficiary.selector, unauthorizedCaller, monolithRecipient
+            )
+        );
+        vm.prank(unauthorizedCaller);
+        factory.setPendingMonolithBeneficiary(address(0xB001));
+
+        vm.expectRevert(CoinDAOFactory.ZeroAddress.selector);
+        vm.prank(monolithRecipient);
+        factory.setPendingMonolithBeneficiary(address(0));
+    }
+
+    function testOnlyLatestPendingMonolithBeneficiaryCanAccept() public {
+        address replacedNominee = address(0xB001);
+        address newBeneficiary = address(0xB002);
+
+        vm.startPrank(monolithRecipient);
+        factory.setPendingMonolithBeneficiary(replacedNominee);
+        factory.setPendingMonolithBeneficiary(newBeneficiary);
+        vm.stopPrank();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CoinDAOFactory.CallerNotPendingMonolithBeneficiary.selector, replacedNominee, newBeneficiary
+            )
+        );
+        vm.prank(replacedNominee);
+        factory.acceptMonolithBeneficiary();
+
+        vm.expectEmit(true, true, false, true, address(factory));
+        emit MonolithBeneficiaryTransferred(monolithRecipient, newBeneficiary);
+        vm.prank(newBeneficiary);
+        factory.acceptMonolithBeneficiary();
+
+        assertEq(factory.monolithBeneficiary(), newBeneficiary);
+        assertEq(factory.pendingMonolithBeneficiary(), address(0));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CoinDAOFactory.CallerNotMonolithBeneficiary.selector, monolithRecipient, newBeneficiary
+            )
+        );
+        vm.prank(monolithRecipient);
+        factory.setPendingMonolithBeneficiary(address(0xB003));
+    }
+
+    function testBeneficiaryHandoffOnlyAffectsFutureMonolithVestings() public {
+        CoinDAOFactory.Deployment memory first = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
+        address newBeneficiary = address(0xB001);
+
+        vm.prank(monolithRecipient);
+        factory.setPendingMonolithBeneficiary(newBeneficiary);
+
+        CoinDAOFactory.Deployment memory beforeAcceptance = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
+        assertEq(VestingWallet(payable(first.monolithVesting)).owner(), monolithRecipient);
+        assertEq(VestingWallet(payable(beforeAcceptance.monolithVesting)).owner(), monolithRecipient);
+
+        vm.prank(newBeneficiary);
+        factory.acceptMonolithBeneficiary();
+        CoinDAOFactory.Deployment memory afterAcceptance = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
+
+        assertEq(VestingWallet(payable(first.monolithVesting)).owner(), monolithRecipient);
+        assertEq(VestingWallet(payable(beforeAcceptance.monolithVesting)).owner(), monolithRecipient);
+        assertEq(VestingWallet(payable(afterAcceptance.monolithVesting)).owner(), newBeneficiary);
     }
 
     function testAllocationForZeroDeployerStake() public view {
@@ -153,7 +242,7 @@ contract CoinDAOFactoryTest is Test {
         assertEq(Ownable(deployment.revenueRouter).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.treasuryVesting)).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.monolithVesting)).owner(), monolithRecipient);
-        assertEq(factory.monolithTreasury(), monolithRecipient);
+        assertEq(factory.monolithBeneficiary(), monolithRecipient);
         assertEq(VestingWallet(payable(deployment.deployerVesting)).owner(), deployerRecipient);
         assertEq(RevenueRouter(deployment.revenueRouter).govStakingBps(), 10_000);
         assertFalse(TimelockController(payable(deployment.timelock)).hasRole(bytes32(0), address(factory)));

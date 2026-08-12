@@ -42,7 +42,8 @@ contract CoinDAOFactory {
     uint256 public constant GOV_STAKING_REWARD_DURATION = 7 days;
 
     IMonolithFactory public immutable monolithFactory;
-    address public immutable monolithTreasury;
+    address public monolithBeneficiary;
+    address public pendingMonolithBeneficiary;
 
     enum StakingTokenChoice {
         Coin,
@@ -100,6 +101,8 @@ contract CoinDAOFactory {
         address coinStakingRewardsFunder
     );
     event CoinDAOAttached(uint256 indexed id, address indexed lender, address indexed previousOperator);
+    event MonolithBeneficiaryTransferStarted(address indexed currentBeneficiary, address indexed pendingBeneficiary);
+    event MonolithBeneficiaryTransferred(address indexed previousBeneficiary, address indexed newBeneficiary);
 
     error ZeroAddress();
     error DeployerStakeExceedsMaximum(uint16 deployerStakeBps);
@@ -108,15 +111,40 @@ contract CoinDAOFactory {
     error CoinDAOAlreadyExists(address lender);
     error CallerNotLenderOperator(address caller, address operator);
     error FactoryNotPendingOperator(address pendingOperator);
+    error CallerNotMonolithBeneficiary(address caller, address beneficiary);
+    error CallerNotPendingMonolithBeneficiary(address caller, address pendingBeneficiary);
 
-    constructor(IMonolithFactory monolithFactory_, address monolithTreasury_) {
-        if (address(monolithFactory_) == address(0) || monolithTreasury_ == address(0)) revert ZeroAddress();
+    constructor(IMonolithFactory monolithFactory_, address monolithBeneficiary_) {
+        if (address(monolithFactory_) == address(0) || monolithBeneficiary_ == address(0)) revert ZeroAddress();
         monolithFactory = monolithFactory_;
-        monolithTreasury = monolithTreasury_;
+        monolithBeneficiary = monolithBeneficiary_;
     }
 
     function deploymentsLength() external view returns (uint256) {
         return deployments.length;
+    }
+
+    function setPendingMonolithBeneficiary(address pendingBeneficiary) external {
+        address currentBeneficiary = monolithBeneficiary;
+        if (msg.sender != currentBeneficiary) {
+            revert CallerNotMonolithBeneficiary(msg.sender, currentBeneficiary);
+        }
+        if (pendingBeneficiary == address(0)) revert ZeroAddress();
+
+        pendingMonolithBeneficiary = pendingBeneficiary;
+        emit MonolithBeneficiaryTransferStarted(currentBeneficiary, pendingBeneficiary);
+    }
+
+    function acceptMonolithBeneficiary() external {
+        address pendingBeneficiary = pendingMonolithBeneficiary;
+        if (msg.sender != pendingBeneficiary) {
+            revert CallerNotPendingMonolithBeneficiary(msg.sender, pendingBeneficiary);
+        }
+
+        address previousBeneficiary = monolithBeneficiary;
+        monolithBeneficiary = pendingBeneficiary;
+        pendingMonolithBeneficiary = address(0);
+        emit MonolithBeneficiaryTransferred(previousBeneficiary, pendingBeneficiary);
     }
 
     function allocationFor(uint16 deployerStakeBps) public pure returns (AllocationAmounts memory allocation) {
@@ -270,7 +298,7 @@ contract CoinDAOFactory {
         );
         deployment.treasuryVesting = address(treasuryVesting);
         VestingWallet monolithVesting = VestingWallet(
-            payable(CoreDeploymentLib.deployVestingWallet(monolithTreasury, uint64(block.timestamp), FOUR_YEARS))
+            payable(CoreDeploymentLib.deployVestingWallet(monolithBeneficiary, uint64(block.timestamp), FOUR_YEARS))
         );
         deployment.monolithVesting = address(monolithVesting);
         VestingWallet deployerVesting;

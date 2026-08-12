@@ -21,7 +21,7 @@ against by how much of it is original project logic versus reused library code. 
 | `src/StakedGovToken.sol` | Adapted + standard composition | OZ ERC20Wrapper/ERC20Votes plus Synthetix reward accounting | Reward queueing, final-withdraw behavior, non-transferability |
 | `src/StakingRewards.sol` | Adapted | Synthetix `StakingRewards` | Solidity 0.8 port and intentionally removed hooks |
 | `src/GovToken.sol` | Standard composition | OZ ERC20 + ERC20Permit | Fixed supply and initial holder |
-| `src/CoinDAOGovernor.sol` | Standard composition | OZ Governor extensions | Absolute quorum/threshold parameters |
+| `src/CoinDAOGovernor.sol` | Standard composition | OZ Governor extensions | Fractional quorum and threshold parameters |
 | `src/RevenueRouter.sol` | Novel | Written for Monolith | Revenue split and Lender operator authority |
 | `src/StakingRewardsFunder.sol` | Novel | Written for Monolith | Tranche schedule and final balance sweep |
 | `src/CoinDAOFactory.sol` | Novel | Written for Monolith | Allocation math, deployment ordering, privilege handoff |
@@ -74,19 +74,18 @@ votes; governance power is created only when GOV is staked into `StakedGovToken`
 
 ### `src/CoinDAOGovernor.sol`
 
-The governor composes OZ Governor, GovernorSettings, GovernorCountingSimple, GovernorVotes, and
-GovernorTimelockControl. The project-specific behavior is parameterization:
+The governor composes OZ Governor, GovernorSettings, GovernorCountingSimple,
+GovernorVotesQuorumFraction, and GovernorTimelockControl. The project-specific behavior is parameterization:
 
 - Voting delay: 7,200 blocks.
 - Voting period: 36,000 blocks.
 - Proposal threshold: 0.1% of fixed GOV supply, supplied by the factory.
-- Initial quorum: 1% of fixed GOV supply, supplied by the factory.
+- Initial quorum: 0.1% of historical staked GOV supply, supplied by the factory as numerator `1`.
 
-The quorum is an absolute `sGOV` vote amount because `sGOV.totalSupply()` may be much lower than
-total GOV supply, and a fraction of staked supply would make quorum easier as participation falls.
-Governance may update the absolute threshold between one wei and the full fixed GOV supply.
-Updates are checkpointed using the governor clock, so each proposal keeps the quorum that applied
-at its voting snapshot and historical `quorum(timepoint)` queries remain stable.
+The governor uses OZ `GovernorVotesQuorumFraction` with a denominator of 1,000. Governance may
+update the numerator between 0 and 1,000. Both the numerator and `sGOV` total supply are read at a
+proposal's voting snapshot, so subsequent quorum updates or staking changes do not affect it.
+Because quorum is a fraction of staked supply, the absolute vote requirement falls when less GOV is staked.
 
 ## Novel Code
 

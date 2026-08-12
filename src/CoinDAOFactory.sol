@@ -34,7 +34,7 @@ contract CoinDAOFactory {
     uint16 public constant DEFAULT_GOV_STAKING_BPS = 10_000;
     uint256 public constant GOV_TOKEN_SUPPLY = FIXED_GOV_TOKEN_SUPPLY;
     uint256 public constant GOVERNOR_PROPOSAL_THRESHOLD = GOV_TOKEN_SUPPLY / 1_000;
-    uint256 public constant GOVERNOR_QUORUM = GOV_TOKEN_SUPPLY / 1000;
+    uint256 public constant GOVERNOR_QUORUM_NUMERATOR = 1;
 
     uint64 public constant FOUR_YEARS = 365 days * 4;
     uint256 public constant DEFAULT_TIMELOCK_DELAY = 2 days;
@@ -264,7 +264,11 @@ contract CoinDAOFactory {
         string memory governorName = string.concat(params.govTokenName, " Governor");
         CoinDAOGovernor governor = CoinDAOGovernor(
             payable(GovernorDeploymentLib.deployGovernor(
-                    governorName, IVotes(address(staker)), timelock, GOVERNOR_PROPOSAL_THRESHOLD, GOVERNOR_QUORUM
+                    governorName,
+                    IVotes(address(staker)),
+                    timelock,
+                    GOVERNOR_PROPOSAL_THRESHOLD,
+                    GOVERNOR_QUORUM_NUMERATOR
                 ))
         );
         deployment.governor = address(governor);

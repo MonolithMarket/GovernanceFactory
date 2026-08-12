@@ -70,9 +70,9 @@ library GovernorDeploymentLib {
         IVotes token_,
         TimelockController timelock_,
         uint256 proposalThreshold_,
-        uint256 quorum_
+        uint256 quorumNumerator_
     ) external returns (address) {
-        return address(new CoinDAOGovernor(name_, token_, timelock_, proposalThreshold_, quorum_));
+        return address(new CoinDAOGovernor(name_, token_, timelock_, proposalThreshold_, quorumNumerator_));
     }
 }
 

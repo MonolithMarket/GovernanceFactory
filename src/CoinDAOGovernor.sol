@@ -7,38 +7,34 @@ import {GovernorCountingSimple} from "@openzeppelin/contracts/governance/extensi
 import {GovernorSettings} from "@openzeppelin/contracts/governance/extensions/GovernorSettings.sol";
 import {GovernorTimelockControl} from "@openzeppelin/contracts/governance/extensions/GovernorTimelockControl.sol";
 import {GovernorVotes} from "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol";
+import {
+    GovernorVotesQuorumFraction
+} from "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
-import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import {Checkpoints} from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 
-import {GOV_TOKEN_SUPPLY} from "./GovToken.sol";
-
-contract CoinDAOGovernor is Governor, GovernorSettings, GovernorCountingSimple, GovernorVotes, GovernorTimelockControl {
-    using Checkpoints for Checkpoints.Trace208;
-
+contract CoinDAOGovernor is
+    Governor,
+    GovernorSettings,
+    GovernorCountingSimple,
+    GovernorVotesQuorumFraction,
+    GovernorTimelockControl
+{
     uint48 public constant DEFAULT_VOTING_DELAY_BLOCKS = 7_200;
     uint32 public constant DEFAULT_VOTING_PERIOD_BLOCKS = 36_000;
-    /// @dev Absolute number of GOV token votes needed to reach quorum.
-    Checkpoints.Trace208 private _quorumHistory;
-
-    event QuorumSet(uint256 oldQuorum, uint256 newQuorum);
-
-    error InvalidQuorum(uint256 quorum);
 
     constructor(
         string memory name_,
         IVotes token_,
         TimelockController timelock_,
         uint256 proposalThreshold_,
-        uint256 quorum_
+        uint256 quorumNumerator_
     )
         Governor(name_)
         GovernorSettings(DEFAULT_VOTING_DELAY_BLOCKS, DEFAULT_VOTING_PERIOD_BLOCKS, proposalThreshold_)
         GovernorVotes(token_)
+        GovernorVotesQuorumFraction(quorumNumerator_)
         GovernorTimelockControl(timelock_)
-    {
-        _setQuorum(quorum_);
-    }
+    {}
 
     function votingDelay() public view override(Governor, GovernorSettings) returns (uint256) {
         return super.votingDelay();
@@ -65,29 +61,12 @@ contract CoinDAOGovernor is Governor, GovernorSettings, GovernorCountingSimple, 
         return super.proposalNeedsQueuing(proposalId);
     }
 
-    function quorum(uint256 timepoint) public view override returns (uint256) {
-        return _optimisticUpperLookupRecent(_quorumHistory, timepoint);
+    function quorum(uint256 timepoint) public view override(Governor, GovernorVotesQuorumFraction) returns (uint256) {
+        return super.quorum(timepoint);
     }
 
-    function setQuorum(uint256 newQuorum) external onlyGovernance {
-        _setQuorum(newQuorum);
-    }
-
-    function _setQuorum(uint256 newQuorum) internal {
-        if (newQuorum == 0 || newQuorum > GOV_TOKEN_SUPPLY) revert InvalidQuorum(newQuorum);
-
-        uint256 oldQuorum = _quorumHistory.latest();
-        _quorumHistory.push(clock(), SafeCast.toUint208(newQuorum));
-        emit QuorumSet(oldQuorum, newQuorum);
-    }
-
-    function _optimisticUpperLookupRecent(Checkpoints.Trace208 storage checkpoints, uint256 timepoint)
-        internal
-        view
-        returns (uint256)
-    {
-        (, uint48 latestKey, uint208 latestValue) = checkpoints.latestCheckpoint();
-        return latestKey <= timepoint ? latestValue : checkpoints.upperLookupRecent(SafeCast.toUint48(timepoint));
+    function quorumDenominator() public pure override returns (uint256) {
+        return 1_000;
     }
 
     function _queueOperations(

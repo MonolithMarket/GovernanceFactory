@@ -28,7 +28,7 @@ contract CoinDAOFactory {
     uint16 public constant MONOLITH_BPS = 200;
     uint16 public constant ALLOCATION_WEIGHT_TOTAL = 9_800;
     uint16 public constant COIN_STAKING_REWARDS_WEIGHT = 6_500;
-    uint16 public constant IMMEDIATE_TREASURY_WEIGHT = 500;
+    uint16 public constant IMMEDIATE_ALLOCATION_WEIGHT = 500;
     uint16 public constant VESTED_TREASURY_WEIGHT = 2_800;
     uint16 public constant DEFAULT_GOV_STAKING_BPS = 10_000;
     uint256 public constant GOV_TOKEN_SUPPLY = FIXED_GOV_TOKEN_SUPPLY;
@@ -60,7 +60,7 @@ contract CoinDAOFactory {
     struct AllocationAmounts {
         uint256 coinStakingRewards;
         uint256 treasuryVested;
-        uint256 immediateTreasuryAllocation;
+        uint256 immediateAllocation;
         uint256 monolithVesting;
         uint256 deployerVesting;
     }
@@ -150,16 +150,19 @@ contract CoinDAOFactory {
         if (deployerStakeBps > MAX_DEPLOYER_STAKE_BPS) revert DeployerStakeExceedsMaximum(deployerStakeBps);
 
         uint256 totalSupply = GOV_TOKEN_SUPPLY;
+        // Monolith beneficiary always receives 2%, vesting over 4 years.
         allocation.monolithVesting = (totalSupply * MONOLITH_BPS) / uint256(BPS);
+        // Deployer vesting receives up to 20% of supply over 4 years.
         allocation.deployerVesting = (totalSupply * deployerStakeBps) / uint256(BPS);
+        // The remainder is split using a 65:5:28 staking/immediate/vested-treasury ratio.
+        // Increasing the deployer stake proportionally reduces all three of those allocations.
         uint256 remainingAllocation = totalSupply - allocation.monolithVesting - allocation.deployerVesting;
         allocation.coinStakingRewards =
             (remainingAllocation * COIN_STAKING_REWARDS_WEIGHT) / uint256(ALLOCATION_WEIGHT_TOTAL);
-        allocation.immediateTreasuryAllocation =
-            (remainingAllocation * IMMEDIATE_TREASURY_WEIGHT) / uint256(ALLOCATION_WEIGHT_TOTAL);
+        allocation.immediateAllocation =
+            (remainingAllocation * IMMEDIATE_ALLOCATION_WEIGHT) / uint256(ALLOCATION_WEIGHT_TOTAL);
         // Assign all division dust to the vested treasury so the fixed supply is fully allocated.
-        allocation.treasuryVested =
-            remainingAllocation - allocation.coinStakingRewards - allocation.immediateTreasuryAllocation;
+        allocation.treasuryVested = remainingAllocation - allocation.coinStakingRewards - allocation.immediateAllocation;
     }
 
     function deploy(
@@ -320,8 +323,10 @@ contract CoinDAOFactory {
         coinStakingRewardsFunder.fundNextTranche();
         coinStakingRewards.renounceOwnership();
 
-        // Fund the remaining allocations; the treasury receives liquid GOV plus its vesting wallet.
-        govTokenErc20.safeTransfer(address(timelock), allocation.immediateTreasuryAllocation);
+        // Issue the liquid allocation to the deployer when specified, otherwise retain it in the treasury.
+        address immediateRecipient =
+            params.deployerRecipient == address(0) ? deployment.timelock : params.deployerRecipient;
+        govTokenErc20.safeTransfer(immediateRecipient, allocation.immediateAllocation);
         govTokenErc20.safeTransfer(address(treasuryVesting), allocation.treasuryVested);
         govTokenErc20.safeTransfer(address(monolithVesting), allocation.monolithVesting);
         if (allocation.deployerVesting != 0) {

@@ -6,8 +6,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {GovToken} from "../src/GovToken.sol";
 import {StakedGovToken} from "../src/StakedGovToken.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {CloneTestUtils} from "./helpers/CloneTestUtils.sol";
 
-contract StakedGovTokenTest is Test {
+contract StakedGovTokenTest is Test, CloneTestUtils {
     event RewardsDistributionFinalized(
         address indexed initialRewardsDistribution, address indexed finalRewardsDistribution
     );
@@ -22,9 +23,9 @@ contract StakedGovTokenTest is Test {
     address internal bob = address(0xB0B);
 
     function setUp() public {
-        gov = new GovToken("Governance", "GOV", address(this));
+        gov = _newGovToken("Governance", "GOV", address(this));
         reward = new MockERC20("Coin", "COIN");
-        staker = new StakedGovToken(
+        staker = _newStakedGovToken(
             IERC20(address(gov)), IERC20(address(reward)), "Staked Governance", "sGOV", address(this), REWARDS_DURATION
         );
 

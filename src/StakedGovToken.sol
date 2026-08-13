@@ -1,13 +1,19 @@
 pragma solidity ^0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
-import {ERC20Votes} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
-import {ERC20Wrapper} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Wrapper.sol";
+import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import {
+    ERC20PermitUpgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
+import {
+    ERC20VotesUpgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20VotesUpgradeable.sol";
+import {
+    ERC20WrapperUpgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC20WrapperUpgradeable.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {Nonces} from "@openzeppelin/contracts/utils/Nonces.sol";
+import {NoncesUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/NoncesUpgradeable.sol";
 
 import {INotifiableRewardReceiver} from "./interfaces/INotifiableRewardReceiver.sol";
 
@@ -16,14 +22,22 @@ import {INotifiableRewardReceiver} from "./interfaces/INotifiableRewardReceiver.
 /// GitHub: https://github.com/Synthetixio/synthetix/blob/develop/contracts/StakingRewards.sol
 /// Verified deployment: https://etherscan.io/address/0x8302fe9f0c509a996573d3cc5b0d5d51e4fdd5ec
 /// Functions derived from Synthetix are annotated with the relevant differences.
-contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuard, INotifiableRewardReceiver {
+contract StakedGovToken is
+    ERC20WrapperUpgradeable,
+    ERC20PermitUpgradeable,
+    ERC20VotesUpgradeable,
+    ReentrancyGuard,
+    INotifiableRewardReceiver
+{
     using SafeERC20 for IERC20;
 
     uint256 public constant REWARD_PRECISION = 1e18;
 
-    IERC20 public immutable rewardsToken;
+    bytes32 internal constant _IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.StakedGovToken.v1");
+
+    IERC20 public rewardsToken;
     address public rewardsDistribution;
-    uint256 public immutable rewardsDuration;
+    uint256 public rewardsDuration;
     bool private _rewardsDistributionFinalized;
 
     uint256 public periodFinish;
@@ -51,22 +65,34 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
     // Diff: Replaces Synthetix's plain staking token balance ledger with an ERC20Wrapper
     // receipt token that also supports Permit and Votes. The rewardsDistribution address
     // can be finalized once instead of remaining owner-managed.
-    constructor(
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
         IERC20 govToken_,
         IERC20 rewardsToken_,
         string memory name_,
         string memory symbol_,
         address initialRewardsDistribution_,
         uint256 rewardsDuration_
-    ) ERC20(name_, symbol_) ERC20Permit(name_) ERC20Wrapper(govToken_) {
+    ) external initializer {
         if (address(govToken_) == address(0)) revert ZeroAddress();
         if (address(rewardsToken_) == address(0)) revert ZeroAddress();
         if (initialRewardsDistribution_ == address(0)) revert ZeroAddress();
         if (rewardsDuration_ == 0) revert InvalidRewardAmount();
 
+        __ERC20_init(name_, symbol_);
+        __ERC20Permit_init(name_);
+        __ERC20Wrapper_init(govToken_);
+        __ERC20Votes_init();
         rewardsToken = rewardsToken_;
         rewardsDistribution = initialRewardsDistribution_;
         rewardsDuration = rewardsDuration_;
+    }
+
+    function implementationId() external pure returns (bytes32) {
+        return _IMPLEMENTATION_ID;
     }
 
     // Functionally identical to Synthetix original, with one-time-finalized rewardsDistribution.
@@ -104,7 +130,7 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
     }
 
     // OpenZeppelin wrapper override; not present in Synthetix original.
-    function decimals() public view override(ERC20, ERC20Wrapper) returns (uint8) {
+    function decimals() public view override(ERC20Upgradeable, ERC20WrapperUpgradeable) returns (uint8) {
         return super.decimals();
     }
 
@@ -242,13 +268,18 @@ contract StakedGovToken is ERC20Wrapper, ERC20Permit, ERC20Votes, ReentrancyGuar
 
     // Diff: New OpenZeppelin token hook with no Synthetix equivalent; allows mint/burn
     // only so staked voting receipts remain non-transferable.
-    function _update(address from, address to, uint256 value) internal override(ERC20, ERC20Votes) {
-        if (from != address(0) && to != address(0)) revert NonTransferable();
+    function _update(address from, address to, uint256 value)
+        internal
+        override(ERC20Upgradeable, ERC20VotesUpgradeable)
+    {
+        if (from != address(0) && to != address(0)) {
+            revert NonTransferable();
+        }
         super._update(from, to, value);
     }
 
     // OpenZeppelin Permit/Votes override; not present in Synthetix original.
-    function nonces(address owner) public view override(ERC20Permit, Nonces) returns (uint256) {
+    function nonces(address owner) public view override(ERC20PermitUpgradeable, NoncesUpgradeable) returns (uint256) {
         return super.nonces(owner);
     }
 }

@@ -2,7 +2,7 @@ pragma solidity ^0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @notice Synthetix-style staking rewards.
@@ -10,13 +10,15 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /// GitHub: https://github.com/Synthetixio/synthetix/blob/develop/contracts/StakingRewards.sol
 /// Verified deployment: https://etherscan.io/address/0x8302fe9f0c509a996573d3cc5b0d5d51e4fdd5ec
 /// Original Synthetix snippets are included next to adapted methods; identical methods are marked.
-contract StakingRewards is Ownable, ReentrancyGuard {
+contract StakingRewards is OwnableUpgradeable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint256 public constant REWARD_PRECISION = 1e18;
 
-    IERC20 public immutable stakingToken;
-    IERC20 public immutable rewardsToken;
+    bytes32 internal constant _IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.StakingRewards.v1");
+
+    IERC20 public stakingToken;
+    IERC20 public rewardsToken;
 
     address public rewardsDistribution;
 
@@ -25,7 +27,7 @@ contract StakingRewards is Ownable, ReentrancyGuard {
 
     uint256 public periodFinish;
     uint256 public rewardRate;
-    uint256 public immutable rewardsDuration;
+    uint256 public rewardsDuration;
     uint256 public lastUpdateTime;
     uint256 public rewardPerTokenStored;
     mapping(address account => uint256) public userRewardPerTokenPaid;
@@ -36,17 +38,28 @@ contract StakingRewards is Ownable, ReentrancyGuard {
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
 
-    constructor(address stakingToken_, address rewardsToken_, address initialOwner, uint256 rewardsDuration_)
-        Ownable(initialOwner)
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address stakingToken_, address rewardsToken_, address initialOwner, uint256 rewardsDuration_)
+        external
+        initializer
     {
         require(stakingToken_ != address(0), "Staking token cannot be 0");
         require(rewardsToken_ != address(0), "Rewards token cannot be 0");
+        require(initialOwner != address(0), "Owner cannot be 0");
         require(rewardsDuration_ > 0, "Rewards duration cannot be 0");
 
+        __Ownable_init(initialOwner);
         stakingToken = IERC20(stakingToken_);
         rewardsToken = IERC20(rewardsToken_);
         rewardsDistribution = initialOwner;
         rewardsDuration = rewardsDuration_;
+    }
+
+    function implementationId() external pure returns (bytes32) {
+        return _IMPLEMENTATION_ID;
     }
 
     modifier onlyRewardsDistribution() {

@@ -3,19 +3,22 @@ pragma solidity ^0.8.26;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 
 import {StakingRewards} from "./StakingRewards.sol";
 
 /// @notice Permissionless fixed-schedule funder for a StakingRewards contract.
-contract StakingRewardsFunder is ReentrancyGuard {
+contract StakingRewardsFunder is Initializable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint16 public constant BPS = 10_000;
     uint256 public constant TRANCHE_COUNT = 4;
 
-    StakingRewards public immutable stakingRewards;
-    IERC20 public immutable rewardsToken;
-    uint256 public immutable totalRewards;
+    bytes32 internal constant _IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.StakingRewardsFunder.v1");
+
+    StakingRewards public stakingRewards;
+    IERC20 public rewardsToken;
+    uint256 public totalRewards;
 
     uint256 public nextTranche;
 
@@ -29,13 +32,21 @@ contract StakingRewardsFunder is ReentrancyGuard {
     error NotRewardsDistribution(address rewardsDistribution);
     error InsufficientBalance(uint256 balance, uint256 required);
 
-    constructor(StakingRewards stakingRewards_, uint256 totalRewards_) {
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(StakingRewards stakingRewards_, uint256 totalRewards_) external initializer {
         if (address(stakingRewards_) == address(0)) revert ZeroAddress();
         if (totalRewards_ == 0) revert ZeroRewards();
 
         stakingRewards = stakingRewards_;
         rewardsToken = stakingRewards_.rewardsToken();
         totalRewards = totalRewards_;
+    }
+
+    function implementationId() external pure returns (bytes32) {
+        return _IMPLEMENTATION_ID;
     }
 
     //Each tranche has basispoints corresponding to percentage of total GOV tokens that will be issued to Coin stakers

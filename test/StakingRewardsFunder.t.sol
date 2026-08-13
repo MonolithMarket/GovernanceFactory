@@ -5,8 +5,9 @@ import {Test} from "forge-std/Test.sol";
 import {StakingRewards} from "../src/StakingRewards.sol";
 import {StakingRewardsFunder} from "../src/StakingRewardsFunder.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {CloneTestUtils} from "./helpers/CloneTestUtils.sol";
 
-contract StakingRewardsFunderTest is Test {
+contract StakingRewardsFunderTest is Test, CloneTestUtils {
     MockERC20 internal stakingToken;
     MockERC20 internal rewardsToken;
     StakingRewards internal rewards;
@@ -18,12 +19,12 @@ contract StakingRewardsFunderTest is Test {
         vm.warp(1);
         stakingToken = new MockERC20("Stake", "STK");
         rewardsToken = new MockERC20("Reward", "RWD");
-        rewards = new StakingRewards(address(stakingToken), address(rewardsToken), address(this), 365 days);
-        funder = new StakingRewardsFunder(rewards, 100 ether);
+        rewards = _newStakingRewards(address(stakingToken), address(rewardsToken), address(this), 365 days);
+        funder = _newStakingRewardsFunder(rewards, 100 ether);
     }
 
     function testTrancheMathAndFinalDustAssignment() public {
-        StakingRewardsFunder dustFunder = new StakingRewardsFunder(rewards, 101);
+        StakingRewardsFunder dustFunder = _newStakingRewardsFunder(rewards, 101);
 
         assertEq(dustFunder.TRANCHE_COUNT(), 4);
         assertEq(dustFunder.trancheBps(0), 3_250);

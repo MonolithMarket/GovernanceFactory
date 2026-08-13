@@ -2,20 +2,22 @@ pragma solidity ^0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 import {IMonolithLender} from "./interfaces/IMonolith.sol";
 import {INotifiableRewardReceiver} from "./interfaces/INotifiableRewardReceiver.sol";
 
-contract RevenueRouter is Ownable {
+contract RevenueRouter is OwnableUpgradeable {
     using SafeERC20 for IERC20;
 
     uint16 public constant MAX_BPS = 10_000;
 
-    IMonolithLender public immutable lender;
-    IERC20 public immutable coin;
-    address public immutable treasury;
-    INotifiableRewardReceiver public immutable govStaking;
+    bytes32 internal constant _IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.RevenueRouter.v1");
+
+    IMonolithLender public lender;
+    IERC20 public coin;
+    address public treasury;
+    INotifiableRewardReceiver public govStaking;
     uint16 public govStakingBps;
 
     event GovStakingBpsUpdated(uint16 oldGovStakingBps, uint16 newGovStakingBps);
@@ -25,25 +27,34 @@ contract RevenueRouter is Ownable {
     error ZeroAddress();
     error InvalidGovStakingBps(uint16 govStakingBps);
 
-    constructor(
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
         address lender_,
         address coin_,
         address treasury_,
         address govStaking_,
         uint16 govStakingBps_,
         address owner_
-    ) Ownable(owner_) {
+    ) external initializer {
         if (
             lender_ == address(0) || coin_ == address(0) || treasury_ == address(0) || govStaking_ == address(0)
                 || owner_ == address(0)
         ) revert ZeroAddress();
         if (govStakingBps_ > MAX_BPS) revert InvalidGovStakingBps(govStakingBps_);
 
+        __Ownable_init(owner_);
         lender = IMonolithLender(lender_);
         coin = IERC20(coin_);
         treasury = treasury_;
         govStaking = INotifiableRewardReceiver(govStaking_);
         govStakingBps = govStakingBps_;
+    }
+
+    function implementationId() external pure returns (bytes32) {
+        return _IMPLEMENTATION_ID;
     }
 
     function acceptLenderOperator() external onlyOwner {

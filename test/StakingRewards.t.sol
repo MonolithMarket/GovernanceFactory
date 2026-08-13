@@ -4,8 +4,9 @@ import {Test} from "forge-std/Test.sol";
 
 import {StakingRewards} from "../src/StakingRewards.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {CloneTestUtils} from "./helpers/CloneTestUtils.sol";
 
-contract StakingRewardsTest is Test {
+contract StakingRewardsTest is Test, CloneTestUtils {
     MockERC20 internal stakingToken;
     MockERC20 internal rewardsToken;
     StakingRewards internal rewards;
@@ -16,7 +17,7 @@ contract StakingRewardsTest is Test {
         vm.warp(1);
         stakingToken = new MockERC20("Stake", "STK");
         rewardsToken = new MockERC20("Reward", "RWD");
-        rewards = new StakingRewards(address(stakingToken), address(rewardsToken), address(this), 100 days);
+        rewards = _newStakingRewards(address(stakingToken), address(rewardsToken), address(this), 100 days);
     }
 
     function testLinearRewardsAndEmptyPeriodBehavior() public {

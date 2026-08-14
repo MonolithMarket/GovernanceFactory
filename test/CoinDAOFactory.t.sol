@@ -57,25 +57,7 @@ contract CoinDAOFactoryTest is Test {
         CoinDAOFactory.Implementations memory invalid = implementationSet;
         invalid.govToken = address(0xBAD);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                CoinDAOFactory.InvalidImplementation.selector, factory.GOV_TOKEN_IMPLEMENTATION_ID(), address(0xBAD)
-            )
-        );
-        new CoinDAOFactory(IMonolithFactory(address(monolithFactory)), monolithRecipient, invalid);
-    }
-
-    function testConstructorRejectsIncorrectImplementationType() public {
-        CoinDAOFactory.Implementations memory invalid = implementationSet;
-        invalid.govToken = implementationSet.stakedGovToken;
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                CoinDAOFactory.InvalidImplementation.selector,
-                factory.GOV_TOKEN_IMPLEMENTATION_ID(),
-                implementationSet.stakedGovToken
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(CoinDAOFactory.InvalidImplementation.selector, address(0xBAD)));
         new CoinDAOFactory(IMonolithFactory(address(monolithFactory)), monolithRecipient, invalid);
     }
 
@@ -95,7 +77,7 @@ contract CoinDAOFactoryTest is Test {
 
         vm.expectRevert();
         StakedGovToken(implementationSet.stakedGovToken)
-            .initialize(IERC20(address(1)), IERC20(address(2)), "Staked Governance", "sGOV", address(this), 7 days);
+            .initialize(IERC20(address(1)), IERC20(address(2)), "Staked Governance", "sGOV", address(this));
 
         vm.expectRevert();
         RevenueRouter(implementationSet.revenueRouter)
@@ -199,7 +181,7 @@ contract CoinDAOFactoryTest is Test {
 
         vm.expectRevert();
         StakedGovToken(deployment.staker)
-            .initialize(IERC20(deployment.govToken), IERC20(deployment.coin), "Other", "oGOV", address(this), 1 days);
+            .initialize(IERC20(deployment.govToken), IERC20(deployment.coin), "Other", "oGOV", address(this));
 
         vm.expectRevert();
         RevenueRouter(deployment.revenueRouter)
@@ -417,8 +399,6 @@ contract CoinDAOFactoryTest is Test {
         assertEq(governor.quorumNumerator(), factory.GOVERNOR_QUORUM_NUMERATOR());
         assertEq(governor.quorumDenominator(), 1_000);
         assertEq(staker.rewardsDistribution(), deployment.revenueRouter);
-        assertEq(staker.rewardsDuration(), factory.GOV_STAKING_REWARD_DURATION());
-        assertEq(factory.GOV_STAKING_REWARD_DURATION(), 7 days);
         assertEq(Ownable(deployment.revenueRouter).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.treasuryVesting)).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.monolithVesting)).owner(), monolithRecipient);
@@ -488,8 +468,11 @@ contract CoinDAOFactoryTest is Test {
         assertEq(govToken.balanceOf(deployment.deployerVesting), allocation.deployerVesting);
 
         lender.setAccruedLocalReserves(100 ether);
-        RevenueRouter(deployment.revenueRouter).distribute();
-        assertEq(IERC20(coin).balanceOf(deployment.staker), 100 ether);
+        (uint256 treasuryAmount, uint256 govStakingAmount) = RevenueRouter(deployment.revenueRouter).distribute();
+        assertEq(treasuryAmount, 100 ether);
+        assertEq(govStakingAmount, 0);
+        assertEq(IERC20(coin).balanceOf(deployment.staker), 0);
+        assertEq(IERC20(coin).balanceOf(deployment.timelock), 100 ether);
     }
 
     function testDeployForExistingCoinSupportsSCoinAndZeroDeployerStake() public {
@@ -773,16 +756,13 @@ contract CoinDAOFactoryTest is Test {
         assertEq(governor.quorum(firstTimepoint), 1);
     }
 
-    function testDeployTwiceKeepsRevenueRouterAsRewardsDistribution() public {
+    function testDeployTwiceWiresEachRevenueRouterAsRewardsDistribution() public {
         CoinDAOFactory.Deployment memory first = _deploy(1_000, CoinDAOFactory.StakingTokenChoice.Coin);
         CoinDAOFactory.Deployment memory second = _deploy(0, CoinDAOFactory.StakingTokenChoice.SCoin);
 
         assertEq(StakedGovToken(first.staker).rewardsDistribution(), first.revenueRouter);
         assertEq(StakedGovToken(second.staker).rewardsDistribution(), second.revenueRouter);
-
-        vm.expectRevert(StakedGovToken.RewardsDistributionAlreadyFinalized.selector);
-        vm.prank(first.revenueRouter);
-        StakedGovToken(first.staker).finalizeRewardsDistribution(second.revenueRouter);
+        assertNotEq(first.revenueRouter, second.revenueRouter);
     }
 
     function testCoinStakingFunderReleasesSecondTranchePermissionlessly() public {
@@ -805,7 +785,7 @@ contract CoinDAOFactoryTest is Test {
         );
     }
 
-    function testRouterDistributesRevenueToStakerByDefault() public {
+    function testRouterSendsAllRevenueToTreasuryWithoutStakers() public {
         CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
         MockMonolithLender lender = MockMonolithLender(deployment.lender);
         address newManager = address(0xBEEF);
@@ -815,12 +795,12 @@ contract CoinDAOFactoryTest is Test {
         assertEq(lender.manager(), newManager);
 
         lender.setAccruedLocalReserves(100 ether);
-        RevenueRouter(deployment.revenueRouter).distribute();
-        assertEq(IERC20(deployment.coin).balanceOf(deployment.staker), 100 ether);
-        assertEq(IERC20(deployment.coin).balanceOf(deployment.timelock), 0);
+        (uint256 treasuryAmount, uint256 govStakingAmount) = RevenueRouter(deployment.revenueRouter).distribute();
+        assertEq(treasuryAmount, 100 ether);
+        assertEq(govStakingAmount, 0);
+        assertEq(IERC20(deployment.coin).balanceOf(deployment.staker), 0);
+        assertEq(IERC20(deployment.coin).balanceOf(deployment.timelock), 100 ether);
         assertEq(lender.accruedLocalReserves(), 0);
-        assertEq(StakedGovToken(deployment.staker).queuedRewards(), 100 ether);
-        assertEq(StakedGovToken(deployment.staker).periodFinish(), 0);
     }
 
     function testStakerEarnsCoinRevenueAndPreservesVotes() public {
@@ -842,27 +822,40 @@ contract CoinDAOFactoryTest is Test {
         assertEq(IERC20(deployment.govToken).balanceOf(deployment.staker), 100 ether);
         assertEq(staker.balanceOf(alice), 100 ether);
 
-        // Revenue routed to the staker streams to the sole staker over the reward duration.
+        // Revenue is accrued immediately to the stGOV supply present at distribution time.
         deal(deployment.coin, deployment.revenueRouter, 30 ether, true);
         RevenueRouter(deployment.revenueRouter).distribute();
-        uint256 finish = staker.periodFinish();
+        assertEq(staker.earned(alice), 30 ether);
 
-        // A live-period distribution still pulls reserves, but queues the
-        // staking allocation instead of extending the current period.
-        vm.warp(block.timestamp + 1 days);
+        // Later distributions accrue independently without extending or queueing a period.
         MockMonolithLender(deployment.lender).setAccruedLocalReserves(7 ether);
         RevenueRouter(deployment.revenueRouter).distribute();
 
         assertEq(MockMonolithLender(deployment.lender).accruedLocalReserves(), 0);
-        assertEq(staker.queuedRewards(), 7 ether);
-        assertEq(staker.periodFinish(), finish);
+        assertEq(staker.earned(alice), 37 ether);
 
-        vm.warp(finish);
         vm.prank(alice);
         staker.getReward();
-        assertApproxEqAbs(IERC20(deployment.coin).balanceOf(alice), 30 ether, 1e12);
-        assertEq(staker.queuedRewards(), 0);
-        assertEq(staker.periodFinish(), block.timestamp + 7 days);
+        assertEq(IERC20(deployment.coin).balanceOf(alice), 37 ether);
+        assertEq(staker.earned(alice), 0);
+    }
+
+    function testRouterAppliesConfiguredSplitWithActiveStakers() public {
+        CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
+        address alice = address(0xA11CE);
+        deal(deployment.govToken, alice, 100 ether, true);
+        _stakeGov(deployment, alice, 100 ether);
+
+        vm.prank(deployment.timelock);
+        RevenueRouter(deployment.revenueRouter).setGovStakingBps(2_500);
+
+        MockMonolithLender(deployment.lender).setAccruedLocalReserves(100 ether);
+        (uint256 treasuryAmount, uint256 govStakingAmount) = RevenueRouter(deployment.revenueRouter).distribute();
+
+        assertEq(treasuryAmount, 75 ether);
+        assertEq(govStakingAmount, 25 ether);
+        assertEq(IERC20(deployment.coin).balanceOf(deployment.timelock), 75 ether);
+        assertEq(StakedGovToken(deployment.staker).earned(alice), 25 ether);
     }
 
     function _deploy(uint16 deployerStakeBps, CoinDAOFactory.StakingTokenChoice stakingTokenChoice)

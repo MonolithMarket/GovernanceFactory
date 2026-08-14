@@ -18,7 +18,7 @@ against by how much of it is original project logic versus reused library code. 
 | File | Tag | Provenance | Primary review focus |
 | :-- | :-- | :-- | :-- |
 | `lib/openzeppelin-contracts` | Imported library | OpenZeppelin Contracts v5.6.1 | Version pin and integration assumptions |
-| `src/StakedGovToken.sol` | Adapted + standard composition | OZ ERC20Wrapper/ERC20Votes plus Synthetix reward accounting | Reward queueing, final-withdraw behavior, non-transferability |
+| `src/StakedGovToken.sol` | Novel + standard composition | OZ ERC20Wrapper/ERC20Votes plus direct reward-per-token accounting | Distribution snapshots, rounding, non-transferability |
 | `src/StakingRewards.sol` | Adapted | Synthetix `StakingRewards` | Solidity 0.8 port and intentionally removed hooks |
 | `src/GovToken.sol` | Standard composition | OZ ERC20 + ERC20Permit | Fixed supply and initial holder |
 | `src/CoinDAOGovernor.sol` | Standard composition | OZ Governor extensions | Fractional quorum and threshold parameters |
@@ -37,7 +37,7 @@ ERC20Votes, Governor extensions, TimelockController, Ownable, SafeERC20, Reentra
 VestingWallet, Nonces, and EIP712 utilities. The main review question is not the library code
 itself, but whether each composition uses the right parameters and ownership handoffs.
 
-## Adapted Code
+## Reward Accounting
 
 ### `src/StakedGovToken.sol`
 
@@ -46,14 +46,13 @@ ERC20Wrapper and receive non-transferable `sGOV`. The governor reads votes from 
 staked GOV can vote. Holders still need to delegate `sGOV` to activate vote checkpoints, matching
 the default OZ `ERC20Votes` model.
 
-The reward accounting follows the Synthetix reward-per-token pattern. Project-specific additions
-are:
+Each RevenueRouter notification immediately increases a global reward-per-token accumulator.
+Project-specific behavior is:
 
-- A `rewardsDistribution` address initialized to the factory and finalized exactly once as the
-  `RevenueRouter` during the atomic deployment transaction.
-- Coin rewards queue if no one has staked.
-- If the final staker exits during an active stream, undistributed rewards are moved back into
-  `queuedRewards` instead of being lost.
+- The factory initializes `rewardsDistribution` directly to the paired `RevenueRouter`.
+- Only stGOV balances present when a reward is notified accrue that reward.
+- Deposits and withdrawals checkpoint account rewards before changing balances.
+- Revenue is routed entirely to the treasury when no stGOV supply exists.
 - `sGOV` is non-transferable except mint on deposit and burn on withdrawal.
 - `withdraw()` wraps `withdrawTo()` so callers can withdraw their full balance to themselves.
 
@@ -94,17 +93,17 @@ Because quorum is a fraction of staked supply, the absolute vote requirement fal
 The factory is the largest original surface area. `allocationFor()` implements fixed-supply GOV
 distribution math. `deploy()` wires the Monolith market, GOV token, `sGOV`, governor, timelock,
 staking rewards, revenue router, and vesting wallets, then hands authority to the timelock.
-The factory is the staker's temporary rewards distributor, deploys the router with the known
-staker address, and finalizes the router as distributor before completing the atomic deployment.
+The factory creates the staker and router proxies before initialization, then initializes each
+with the other's address so the router is the staker's reward distributor from inception.
 
 The main risks are misallocation, incomplete initialization, and incomplete privilege handoff.
 
 ### `src/RevenueRouter.sol`
 
 The router receives Coin reserves from the Lender, splits them between `sGOV` rewards and the
-treasury, and notifies the reward receiver after transferring rewards. It also exposes timelock
-managed Lender manager replacement. The fund-routing and cross-contract authority should be
-audited closely.
+treasury, and notifies the reward receiver after transferring rewards. If no stGOV exists, it
+sends the full amount to the treasury. It also exposes timelock-managed Lender manager replacement.
+The fund-routing and cross-contract authority should be audited closely.
 
 ### `src/StakingRewardsFunder.sol`
 
@@ -121,7 +120,7 @@ the external Monolith contracts exactly.
 ## Suggested Audit Priority
 
 1. `CoinDAOFactory.sol`: allocation math and privilege wiring.
-2. `StakedGovToken.sol`: reward queueing, non-transferability, and voting integration.
+2. `StakedGovToken.sol`: distribution snapshots, rounding, non-transferability, and voting integration.
 3. `RevenueRouter.sol`: revenue split and Lender manager authority.
 4. `StakingRewardsFunder.sol`: tranche gating and final sweep.
 5. `StakingRewards.sol`: Synthetix port and removed hooks.

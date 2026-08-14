@@ -11,7 +11,7 @@ This version simplifies the CoinDAO Factory design around a small number of stan
 * **Immediate deployer allocation:** `5% * scale` is liquid at launch for a specified deployer recipient, with the DAO treasury as the fallback.
 * **Optional deployer stake:** deployer may set a 0% to 20% GovToken allocation at launch, vested linearly over 4 years.  
 * **Default CoinStakingRewards:** 65% of supply at 0% deployer stake, reduced pro rata as deployer stake increases; deployer chooses whether staking token is Coin or sCoin.  
-* **GovStaking retained:** GovToken stakers receive streamed Coin revenue and receive the voting receipt token.  
+* **GovStaking retained:** GovToken stakers receive Coin revenue accrued at each distribution and receive the voting receipt token.
 * **Minimal governance powers:** governance controls treasury, RevenueRouter settings, and can replace the Lender manager.  
 * **Operational management remains simple:** the Lender manager can be a multisig for day-to-day experimentation and management.  
 * **Use off-the-shelf code where possible:** OpenZeppelin-style ERC20Votes, Governor, Timelock, and vesting primitives should be used where practical.
@@ -83,13 +83,13 @@ GovStaking is kept in v1 because direct revenue share is important for GovToken 
 
 * Users stake GOV and receive stGOV.  
 * stGOV is the voting token used by Governor. Raw unstaked GOV does not need to vote in v1.  
-* stGOV earns streamed Coin revenue from RevenueRouter.  
+* stGOV earns Coin revenue accrued immediately from RevenueRouter distributions.
 * stGOV should support delegation, so users can delegate voting power to another address.  
 * stGOV can be non-transferable for simpler reward accounting.  
 * Unstaking is instant: burn stGOV and receive the underlying GOV back.  
 * No staking cooldown and no proportional withdrawal escrow in v1.
 
-Revenue streaming can use a standard Synthetix-style staking rewards pattern. RevenueRouter sends Coin to GovStaking and notifies the new reward amount. The implemented GovStaking reward duration is 30 days, and governance controls the reward notifier allowlist through the timelock owner.
+RevenueRouter sends Coin to GovStaking and notifies the new reward amount. Each notification immediately increases a reward-per-stGOV accumulator, so only the stGOV supply present at distribution time earns that revenue. Holders claim their accrued Coin from GovStaking. The router is configured as the immutable reward notifier during factory deployment.
 
 # **7\. RevenueRouter**
 
@@ -106,6 +106,8 @@ Minimal routing logic:
 
 `amountToGovStaking = amount * govStakingBps / 10000`  
 `amountToTreasury = amount - amountToGovStaking`
+
+If no stGOV supply exists when `distribute()` is called, `amountToGovStaking` is zero and all revenue is sent to Treasury.
 
 Required governance-controlled functions should be limited to the essentials:
 

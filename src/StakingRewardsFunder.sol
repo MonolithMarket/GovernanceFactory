@@ -14,8 +14,6 @@ contract StakingRewardsFunder is Initializable, ReentrancyGuard {
     uint16 public constant BPS = 10_000;
     uint256 public constant TRANCHE_COUNT = 4;
 
-    bytes32 internal constant _IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.StakingRewardsFunder.v1");
-
     StakingRewards public stakingRewards;
     IERC20 public rewardsToken;
     uint256 public totalRewards;
@@ -43,10 +41,6 @@ contract StakingRewardsFunder is Initializable, ReentrancyGuard {
         stakingRewards = stakingRewards_;
         rewardsToken = stakingRewards_.rewardsToken();
         totalRewards = totalRewards_;
-    }
-
-    function implementationId() external pure returns (bytes32) {
-        return _IMPLEMENTATION_ID;
     }
 
     //Each tranche has basispoints corresponding to percentage of total GOV tokens that will be issued to Coin stakers

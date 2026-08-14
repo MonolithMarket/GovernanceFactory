@@ -8,8 +8,6 @@ import {
 uint256 constant GOV_TOKEN_SUPPLY = 10_000_000 * 1e18;
 
 contract GovToken is ERC20Upgradeable, ERC20PermitUpgradeable {
-    bytes32 internal constant _IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.GovToken.v1");
-
     constructor() {
         _disableInitializers();
     }
@@ -20,10 +18,6 @@ contract GovToken is ERC20Upgradeable, ERC20PermitUpgradeable {
         __ERC20_init(name_, symbol_);
         __ERC20Permit_init(name_);
         _mint(initialHolder, GOV_TOKEN_SUPPLY);
-    }
-
-    function implementationId() external pure returns (bytes32) {
-        return _IMPLEMENTATION_ID;
     }
 
     error ZeroAddress();

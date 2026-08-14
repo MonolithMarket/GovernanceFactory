@@ -15,7 +15,6 @@ import {StakedGovToken} from "./StakedGovToken.sol";
 import {StakingRewards} from "./StakingRewards.sol";
 import {StakingRewardsFunder} from "./StakingRewardsFunder.sol";
 import {CoreDeploymentLib, GovernorDeploymentLib} from "./deployment/DeploymentLibraries.sol";
-import {IImplementation} from "./interfaces/IImplementation.sol";
 import {IMonolithFactory, IMonolithLender} from "./interfaces/IMonolith.sol";
 
 contract CoinDAOFactory {
@@ -36,15 +35,6 @@ contract CoinDAOFactory {
     uint64 public constant FOUR_YEARS = 365 days * 4;
     uint256 public constant DEFAULT_TIMELOCK_DELAY = 2 days;
     uint256 public constant COIN_STAKING_REWARD_DURATION = 365 days;
-    uint256 public constant GOV_STAKING_REWARD_DURATION = 7 days;
-
-    bytes32 public constant GOV_TOKEN_IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.GovToken.v1");
-    bytes32 public constant STAKED_GOV_TOKEN_IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.StakedGovToken.v1");
-    bytes32 public constant REVENUE_ROUTER_IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.RevenueRouter.v1");
-    bytes32 public constant STAKING_REWARDS_IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.StakingRewards.v1");
-    bytes32 public constant STAKING_REWARDS_FUNDER_IMPLEMENTATION_ID =
-        keccak256("MonolithCoinDAO.StakingRewardsFunder.v1");
-    bytes32 public constant VESTING_WALLET_IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.VestingWallet.v1");
 
     bytes32 internal constant _GOV_TOKEN_COMPONENT = keccak256("GOV_TOKEN");
     bytes32 internal constant _TIMELOCK_COMPONENT = keccak256("TIMELOCK");
@@ -162,7 +152,7 @@ contract CoinDAOFactory {
     error FactoryNotPendingOperator(address pendingOperator);
     error CallerNotMonolithBeneficiary(address caller, address beneficiary);
     error CallerNotPendingMonolithBeneficiary(address caller, address pendingBeneficiary);
-    error InvalidImplementation(bytes32 implementationId, address implementation);
+    error InvalidImplementation(address implementation);
     error DuplicateImplementation(address implementation);
     error DeploymentKeyAlreadyUsed(bytes32 deploymentKey);
 
@@ -389,19 +379,18 @@ contract CoinDAOFactory {
         StakedGovToken staker = StakedGovToken(
             Clones.cloneDeterministic(stakedGovTokenImplementation, _componentSalt(key, _STAKER_COMPONENT))
         );
+        RevenueRouter revenueRouter = RevenueRouter(
+            Clones.cloneDeterministic(revenueRouterImplementation, _componentSalt(key, _REVENUE_ROUTER_COMPONENT))
+        );
         staker.initialize(
             IERC20(deployment.govToken),
             IERC20(deployment.coin),
             string.concat("Staked ", params.govTokenName),
             string.concat("s", params.govTokenSymbol),
-            address(this),
-            GOV_STAKING_REWARD_DURATION
+            address(revenueRouter)
         );
         deployment.staker = address(staker);
 
-        RevenueRouter revenueRouter = RevenueRouter(
-            Clones.cloneDeterministic(revenueRouterImplementation, _componentSalt(key, _REVENUE_ROUTER_COMPONENT))
-        );
         revenueRouter.initialize(
             deployment.lender,
             deployment.coin,
@@ -411,7 +400,6 @@ contract CoinDAOFactory {
             address(this)
         );
         deployment.revenueRouter = address(revenueRouter);
-        staker.finalizeRewardsDistribution(deployment.revenueRouter);
 
         string memory governorName = string.concat(params.govTokenName, " Governor");
         CoinDAOGovernor governor = CoinDAOGovernor(
@@ -538,27 +526,12 @@ contract CoinDAOFactory {
             implementationSet.stakingRewardsFunder,
             implementationSet.vestingWallet
         ];
-        bytes32[6] memory ids = [
-            GOV_TOKEN_IMPLEMENTATION_ID,
-            STAKED_GOV_TOKEN_IMPLEMENTATION_ID,
-            REVENUE_ROUTER_IMPLEMENTATION_ID,
-            STAKING_REWARDS_IMPLEMENTATION_ID,
-            STAKING_REWARDS_FUNDER_IMPLEMENTATION_ID,
-            VESTING_WALLET_IMPLEMENTATION_ID
-        ];
-
         for (uint256 i; i < values.length; ++i) {
             address implementation = values[i];
-            if (implementation.code.length == 0) revert InvalidImplementation(ids[i], implementation);
+            if (implementation.code.length == 0) revert InvalidImplementation(implementation);
 
             for (uint256 j; j < i; ++j) {
                 if (values[j] == implementation) revert DuplicateImplementation(implementation);
-            }
-
-            (bool success, bytes memory result) =
-                implementation.staticcall(abi.encodeCall(IImplementation.implementationId, ()));
-            if (!success || result.length != 32 || abi.decode(result, (bytes32)) != ids[i]) {
-                revert InvalidImplementation(ids[i], implementation);
             }
         }
     }

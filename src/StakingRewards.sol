@@ -15,8 +15,6 @@ contract StakingRewards is OwnableUpgradeable, ReentrancyGuard {
 
     uint256 public constant REWARD_PRECISION = 1e18;
 
-    bytes32 internal constant _IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.StakingRewards.v1");
-
     IERC20 public stakingToken;
     IERC20 public rewardsToken;
 
@@ -56,10 +54,6 @@ contract StakingRewards is OwnableUpgradeable, ReentrancyGuard {
         rewardsToken = IERC20(rewardsToken_);
         rewardsDistribution = initialOwner;
         rewardsDuration = rewardsDuration_;
-    }
-
-    function implementationId() external pure returns (bytes32) {
-        return _IMPLEMENTATION_ID;
     }
 
     modifier onlyRewardsDistribution() {

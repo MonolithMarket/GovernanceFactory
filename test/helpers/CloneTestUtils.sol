@@ -22,11 +22,10 @@ abstract contract CloneTestUtils {
         IERC20 rewardsToken,
         string memory name_,
         string memory symbol_,
-        address rewardsDistribution,
-        uint256 rewardsDuration
+        address rewardsDistribution
     ) internal returns (StakedGovToken token) {
         token = StakedGovToken(Clones.clone(address(new StakedGovToken())));
-        token.initialize(govToken, rewardsToken, name_, symbol_, rewardsDistribution, rewardsDuration);
+        token.initialize(govToken, rewardsToken, name_, symbol_, rewardsDistribution);
     }
 
     function _newStakingRewards(address stakingToken, address rewardsToken, address owner, uint256 rewardsDuration)

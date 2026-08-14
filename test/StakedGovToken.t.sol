@@ -9,11 +9,8 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {CloneTestUtils} from "./helpers/CloneTestUtils.sol";
 
 contract StakedGovTokenTest is Test, CloneTestUtils {
-    event RewardsDistributionFinalized(
-        address indexed initialRewardsDistribution, address indexed finalRewardsDistribution
-    );
-
-    uint256 internal constant REWARDS_DURATION = 7 days;
+    event RewardAdded(uint256 reward);
+    event RewardPaid(address indexed account, uint256 reward);
 
     GovToken internal gov;
     MockERC20 internal reward;
@@ -26,18 +23,15 @@ contract StakedGovTokenTest is Test, CloneTestUtils {
         gov = _newGovToken("Governance", "GOV", address(this));
         reward = new MockERC20("Coin", "COIN");
         staker = _newStakedGovToken(
-            IERC20(address(gov)), IERC20(address(reward)), "Staked Governance", "sGOV", address(this), REWARDS_DURATION
+            IERC20(address(gov)), IERC20(address(reward)), "Staked Governance", "sGOV", address(this)
         );
 
-        gov.transfer(alice, 1_000 ether);
+        assertTrue(gov.transfer(alice, 1_000 ether));
+        assertTrue(gov.transfer(bob, 1_000 ether));
     }
 
     function testDepositDelegatesVotesAndWithdrawsUnderlying() public {
-        vm.startPrank(alice);
-        gov.approve(address(staker), 100 ether);
-        staker.depositFor(alice, 100 ether);
-        staker.delegate(alice);
-        vm.stopPrank();
+        _stake(alice, 100 ether);
 
         vm.roll(block.number + 1);
         assertEq(staker.getVotes(alice), 100 ether);
@@ -52,7 +46,7 @@ contract StakedGovTokenTest is Test, CloneTestUtils {
     }
 
     function testReceiptTokenIsNonTransferable() public {
-        _stakeAlice(100 ether);
+        _stake(alice, 100 ether);
 
         vm.prank(alice);
         vm.expectRevert(StakedGovToken.NonTransferable.selector);
@@ -60,7 +54,7 @@ contract StakedGovTokenTest is Test, CloneTestUtils {
     }
 
     function testWithdrawFullyToSender() public {
-        _stakeAlice(100 ether);
+        _stake(alice, 100 ether);
 
         vm.prank(alice);
         staker.withdraw();
@@ -72,6 +66,7 @@ contract StakedGovTokenTest is Test, CloneTestUtils {
     }
 
     function testOnlyRewardsDistributionCanNotifyRewards() public {
+        _stake(alice, 100 ether);
         reward.mint(address(staker), 30 ether);
 
         vm.prank(alice);
@@ -79,207 +74,102 @@ contract StakedGovTokenTest is Test, CloneTestUtils {
         staker.notifyRewardAmount(30 ether);
     }
 
-    function testRewardsDistributionCanBeFinalizedOnce() public {
-        vm.expectEmit(true, true, false, true, address(staker));
-        emit RewardsDistributionFinalized(address(this), bob);
-        staker.finalizeRewardsDistribution(bob);
-
-        assertEq(staker.rewardsDistribution(), bob);
-
+    function testNotificationRejectsZeroStakedSupply() public {
         reward.mint(address(staker), 30 ether);
-        vm.expectRevert(bytes("Caller is not RewardsDistribution contract"));
+
+        vm.expectRevert(StakedGovToken.NoStakedSupply.selector);
         staker.notifyRewardAmount(30 ether);
-
-        vm.prank(bob);
-        staker.notifyRewardAmount(30 ether);
-        assertEq(staker.queuedRewards(), 30 ether);
-
-        vm.expectRevert(StakedGovToken.RewardsDistributionAlreadyFinalized.selector);
-        vm.prank(bob);
-        staker.finalizeRewardsDistribution(alice);
     }
 
-    function testOnlyCurrentRewardsDistributionCanFinalize() public {
-        vm.expectRevert(bytes("Caller is not RewardsDistribution contract"));
-        vm.prank(alice);
-        staker.finalizeRewardsDistribution(bob);
-    }
-
-    function testFinalRewardsDistributionMustBeNewAndNonzero() public {
-        vm.expectRevert(StakedGovToken.ZeroAddress.selector);
-        staker.finalizeRewardsDistribution(address(0));
-
-        address currentRewardsDistribution = staker.rewardsDistribution();
-        vm.expectRevert(
-            abi.encodeWithSelector(StakedGovToken.InvalidRewardsDistribution.selector, currentRewardsDistribution)
-        );
-        staker.finalizeRewardsDistribution(currentRewardsDistribution);
-    }
-
-    function testRewardsQueueUntilFirstStake() public {
+    function testRewardAccruesImmediatelyToSoleStaker() public {
+        _stake(alice, 100 ether);
         reward.mint(address(staker), 30 ether);
+
+        vm.expectEmit(false, false, false, true, address(staker));
+        emit RewardAdded(30 ether);
         staker.notifyRewardAmount(30 ether);
 
-        assertEq(staker.queuedRewards(), 30 ether);
-        assertEq(staker.periodFinish(), 0);
+        assertEq(staker.rewardPerToken(), 0.3 ether);
+        assertEq(staker.earned(alice), 30 ether);
 
-        _stakeAlice(100 ether);
-
-        assertEq(staker.queuedRewards(), 0);
-        assertEq(staker.periodFinish(), block.timestamp + REWARDS_DURATION);
-
-        vm.warp(block.timestamp + REWARDS_DURATION);
+        vm.expectEmit(true, false, false, true, address(staker));
+        emit RewardPaid(alice, 30 ether);
         vm.prank(alice);
         staker.getReward();
 
-        assertApproxEqAbs(reward.balanceOf(alice), 30 ether, 1e12);
+        assertEq(reward.balanceOf(alice), 30 ether);
+        assertEq(staker.earned(alice), 0);
     }
 
-    function testUnderfundedQueuedRewardsDoNotBlockStaking() public {
-        staker.notifyRewardAmount(30 ether);
+    function testRewardAccruesProRataToCurrentStakers() public {
+        _stake(alice, 100 ether);
+        _stake(bob, 300 ether);
 
-        _stakeAlice(100 ether);
+        _notifyReward(40 ether);
 
-        assertEq(staker.balanceOf(alice), 100 ether);
-        assertEq(gov.balanceOf(address(staker)), 100 ether);
-        assertEq(staker.queuedRewards(), 30 ether);
-        assertEq(staker.rewardRate(), 0);
-        assertEq(staker.periodFinish(), 0);
-
-        reward.mint(address(staker), 30 ether);
-        staker.notifyRewardAmount(0);
-
-        assertEq(staker.queuedRewards(), 0);
-        assertEq(staker.periodFinish(), block.timestamp + REWARDS_DURATION);
+        assertEq(staker.earned(alice), 10 ether);
+        assertEq(staker.earned(bob), 30 ether);
     }
 
-    function testMidPeriodRewardsQueueWithoutChangingActivePeriod() public {
-        _stakeAlice(100 ether);
-        reward.mint(address(staker), 21 ether);
-        staker.notifyRewardAmount(14 ether);
+    function testNewStakeDoesNotEarnPastRewards() public {
+        _stake(alice, 100 ether);
+        _notifyReward(10 ether);
 
-        uint256 finish = staker.periodFinish();
-        uint256 rate = staker.rewardRate();
+        _stake(bob, 100 ether);
+        _notifyReward(20 ether);
 
-        vm.warp(block.timestamp + 2 days);
-        staker.notifyRewardAmount(7 ether);
-
-        assertEq(staker.periodFinish(), finish);
-        assertEq(staker.rewardRate(), rate);
-        assertEq(staker.queuedRewards(), 7 ether);
-        assertApproxEqAbs(staker.earned(alice), 4 ether, 1e12);
+        assertEq(staker.earned(alice), 20 ether);
+        assertEq(staker.earned(bob), 10 ether);
     }
 
-    function testPermissionlessStartQueuedRewardsAfterIdleDelay() public {
-        _stakeAlice(100 ether);
-        reward.mint(address(staker), 21 ether);
-        staker.notifyRewardAmount(7 ether);
-        staker.notifyRewardAmount(14 ether);
+    function testStakeImmediatelyBeforeNotificationSharesReward() public {
+        _stake(alice, 100 ether);
+        _stake(bob, 100 ether);
 
-        vm.warp(staker.periodFinish() + 2 days);
-        vm.prank(bob);
-        staker.startQueuedRewards();
+        _notifyReward(20 ether);
 
-        assertEq(staker.queuedRewards(), 0);
-        assertEq(staker.rewardRate(), 14 ether / REWARDS_DURATION);
-        assertEq(staker.periodFinish(), block.timestamp + REWARDS_DURATION);
+        assertEq(staker.earned(alice), 10 ether);
+        assertEq(staker.earned(bob), 10 ether);
     }
 
-    function testStartQueuedRewardsNoOpsWhenIneligible() public {
-        staker.startQueuedRewards();
-        assertEq(staker.periodFinish(), 0);
-
-        reward.mint(address(staker), 14 ether);
-        staker.notifyRewardAmount(7 ether);
-        staker.startQueuedRewards();
-        assertEq(staker.queuedRewards(), 7 ether);
-        assertEq(staker.periodFinish(), 0);
-
-        _stakeAlice(100 ether);
-        staker.notifyRewardAmount(7 ether);
-
-        uint256 finish = staker.periodFinish();
-        uint256 rate = staker.rewardRate();
-        uint256 lastUpdateTime = staker.lastUpdateTime();
-        vm.warp(block.timestamp + 1 days);
-        staker.startQueuedRewards();
-
-        assertEq(staker.queuedRewards(), 7 ether);
-        assertEq(staker.periodFinish(), finish);
-        assertEq(staker.rewardRate(), rate);
-        assertEq(staker.lastUpdateTime(), lastUpdateTime);
-    }
-
-    function testClaimStartsEligibleQueuedPeriod() public {
-        _stakeAlice(100 ether);
-        reward.mint(address(staker), 21 ether);
-        staker.notifyRewardAmount(7 ether);
-        staker.notifyRewardAmount(14 ether);
-
-        vm.warp(staker.periodFinish());
-        vm.prank(alice);
-        staker.getReward();
-
-        assertApproxEqAbs(reward.balanceOf(alice), 7 ether, 1e12);
-        assertEq(staker.queuedRewards(), 0);
-        assertEq(staker.periodFinish(), block.timestamp + REWARDS_DURATION);
-    }
-
-    function testPartialWithdrawalStartsEligibleQueuedPeriod() public {
-        _stakeAlice(100 ether);
-        reward.mint(address(staker), 21 ether);
-        staker.notifyRewardAmount(7 ether);
-        staker.notifyRewardAmount(14 ether);
-
-        vm.warp(staker.periodFinish());
-        vm.prank(alice);
-        staker.withdrawTo(alice, 40 ether);
-
-        assertEq(staker.balanceOf(alice), 60 ether);
-        assertEq(staker.queuedRewards(), 0);
-        assertEq(staker.periodFinish(), block.timestamp + REWARDS_DURATION);
-    }
-
-    function testLaterNotificationStartsQueuedPeriod() public {
-        _stakeAlice(100 ether);
-        reward.mint(address(staker), 28 ether);
-        staker.notifyRewardAmount(7 ether);
-        staker.notifyRewardAmount(14 ether);
-
-        vm.warp(staker.periodFinish());
-        staker.notifyRewardAmount(7 ether);
-
-        assertEq(staker.queuedRewards(), 0);
-        assertEq(staker.rewardRate(), 21 ether / REWARDS_DURATION);
-        assertEq(staker.periodFinish(), block.timestamp + REWARDS_DURATION);
-    }
-
-    function testFinalWithdrawQueuesUndistributedRewards() public {
-        _stakeAlice(100 ether);
-        reward.mint(address(staker), 28 ether);
-        staker.notifyRewardAmount(28 ether);
-
-        vm.warp(block.timestamp + 1 days);
+    function testWithdrawnHolderRetainsAccruedReward() public {
+        _stake(alice, 100 ether);
+        _notifyReward(30 ether);
 
         vm.prank(alice);
-        staker.withdrawTo(alice, 100 ether);
+        staker.withdraw();
 
         assertEq(staker.totalSupply(), 0);
-        assertEq(staker.rewardRate(), 0);
-        assertEq(staker.periodFinish(), block.timestamp);
-        assertApproxEqAbs(staker.earned(alice), 4 ether, 1e12);
-        assertApproxEqAbs(staker.queuedRewards(), 24 ether, 1e12);
+        assertEq(staker.earned(alice), 30 ether);
 
         vm.prank(alice);
         staker.getReward();
-        assertApproxEqAbs(reward.balanceOf(alice), 4 ether, 1e12);
+        assertEq(reward.balanceOf(alice), 30 ether);
     }
 
-    function _stakeAlice(uint256 amount) internal {
-        vm.startPrank(alice);
+    function testBalanceChangesApplyOnlyToLaterDistributions() public {
+        _stake(alice, 100 ether);
+        _stake(bob, 100 ether);
+        _notifyReward(20 ether);
+
+        vm.prank(bob);
+        staker.withdrawTo(bob, 50 ether);
+        _notifyReward(15 ether);
+
+        assertEq(staker.earned(alice), 20 ether);
+        assertEq(staker.earned(bob), 15 ether);
+    }
+
+    function _notifyReward(uint256 amount) internal {
+        reward.mint(address(staker), amount);
+        staker.notifyRewardAmount(amount);
+    }
+
+    function _stake(address account, uint256 amount) internal {
+        vm.startPrank(account);
         gov.approve(address(staker), amount);
-        staker.depositFor(alice, amount);
-        staker.delegate(alice);
+        staker.depositFor(account, amount);
+        staker.delegate(account);
         vm.stopPrank();
     }
 }

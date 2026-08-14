@@ -12,8 +12,6 @@ contract RevenueRouter is OwnableUpgradeable {
 
     uint16 public constant MAX_BPS = 10_000;
 
-    bytes32 internal constant _IMPLEMENTATION_ID = keccak256("MonolithCoinDAO.RevenueRouter.v1");
-
     IMonolithLender public lender;
     IERC20 public coin;
     address public treasury;
@@ -53,10 +51,6 @@ contract RevenueRouter is OwnableUpgradeable {
         govStakingBps = govStakingBps_;
     }
 
-    function implementationId() external pure returns (bytes32) {
-        return _IMPLEMENTATION_ID;
-    }
-
     function acceptLenderOperator() external onlyOwner {
         lender.acceptOperator();
     }
@@ -65,7 +59,9 @@ contract RevenueRouter is OwnableUpgradeable {
         lender.pullLocalReserves();
 
         uint256 amount = coin.balanceOf(address(this));
-        govStakingAmount = (amount * govStakingBps) / MAX_BPS;
+        if (IERC20(address(govStaking)).totalSupply() != 0) {
+            govStakingAmount = (amount * govStakingBps) / MAX_BPS;
+        }
         treasuryAmount = amount - govStakingAmount;
 
         if (govStakingAmount != 0) {

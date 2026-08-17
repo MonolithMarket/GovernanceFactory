@@ -74,9 +74,8 @@ contract DeploymentScriptsTest is Test {
         script = new DeployCoinDAOScriptHarness();
     }
 
-    function testUsesFixedSepoliaContractsAndMetadata() public {
+    function testDefaultSepoliaConfiguration() public {
         DeployCoinDAOFactoryScript factoryScript = new DeployCoinDAOFactoryScript();
-
         assertEq(script.SEPOLIA_CHAIN_ID(), 11_155_111);
         assertEq(script.MONOLITH_FACTORY(), 0x365009FA2Ddb17f386E20854E4B281827619E4D2);
         assertEq(script.WETH(), 0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9);
@@ -86,12 +85,9 @@ contract DeploymentScriptsTest is Test {
         assertEq(script.GOV_TOKEN_NAME(), "Monolith Sepolia Governance");
         assertEq(script.GOV_TOKEN_SYMBOL(), "msGOV");
         assertEq(factoryScript.MONOLITH_FACTORY(), script.MONOLITH_FACTORY());
-    }
 
-    function testBuildsDefaultTreasuryAndCoinStakingLaunch() public view {
         CoinDAOFactory.GovLaunchParams memory govParams = script.defaultGovParams();
         IMonolithFactory.DeployParams memory monolithParams = script.defaultMonolithParams();
-
         assertEq(govParams.govTokenName, "Monolith Sepolia Governance");
         assertEq(govParams.govTokenSymbol, "msGOV");
         assertEq(govParams.deployerStakeBps, 0);
@@ -115,22 +111,13 @@ contract DeploymentScriptsTest is Test {
         assertEq(monolithParams.maxBorrowDeltaBps, 50);
     }
 
-    function testAcceptsSCoinStakingOverride() public view {
+    function testLaunchOverridesAndValidation() public {
         CoinDAOFactory.GovLaunchParams memory params = script.buildGovParams(0, address(0), "SCOIN");
         assertEq(uint256(params.stakingTokenChoice), uint256(CoinDAOFactory.StakingTokenChoice.SCoin));
-    }
-
-    function testRejectsUnknownStakingToken() public {
         vm.expectRevert("STAKING_TOKEN must be COIN or SCOIN");
         script.buildGovParams(0, address(0), "LP");
-    }
-
-    function testRejectsVestedStakeWithoutRecipient() public {
         vm.expectRevert("Deployer recipient required");
         script.buildGovParams(1, address(0), "COIN");
-    }
-
-    function testRejectsInvalidMarketOverride() public {
         vm.expectRevert("Invalid half life");
         script.buildMonolithParams(5_000, 1_000 ether, 365 days, 12 hours - 1, 2_000, 4_000, 30, 48 hours, 50);
     }

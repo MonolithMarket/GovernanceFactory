@@ -49,7 +49,7 @@ the default OZ `ERC20Votes` model.
 Each RevenueRouter notification immediately increases a global reward-per-token accumulator.
 Project-specific behavior is:
 
-- The factory initializes `rewardsDistribution` directly to the paired `RevenueRouter`.
+- The factory initializes `revenueRouter` directly to the paired `RevenueRouter`.
 - Only stGOV balances present when a reward is notified accrue that reward.
 - Deposits and withdrawals checkpoint account rewards before changing balances.
 - Revenue is routed entirely to the treasury when no stGOV supply exists.

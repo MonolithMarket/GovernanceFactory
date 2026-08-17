@@ -17,6 +17,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {NoncesUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/NoncesUpgradeable.sol";
 
 import {INotifiableRewardReceiver} from "./interfaces/INotifiableRewardReceiver.sol";
+import {IRevenueDistributor} from "./interfaces/IRevenueDistributor.sol";
 
 /// @notice Non-transferable staked GOV receipt token with delegated voting and Coin rewards.
 /// @dev Each reward notification is accrued immediately to the stGOV supply that exists at that moment.
@@ -32,7 +33,7 @@ contract StakedGovToken is
     uint256 public constant REWARD_PRECISION = 1e18;
 
     IERC20 public rewardsToken;
-    address public rewardsDistribution;
+    IRevenueDistributor public revenueRouter;
 
     uint256 public rewardPerTokenStored;
 
@@ -55,26 +56,28 @@ contract StakedGovToken is
         IERC20 rewardsToken_,
         string memory name_,
         string memory symbol_,
-        address rewardsDistribution_
+        address revenueRouter_
     ) external initializer {
         if (address(govToken_) == address(0)) revert ZeroAddress();
         if (address(rewardsToken_) == address(0)) revert ZeroAddress();
-        if (rewardsDistribution_ == address(0)) revert ZeroAddress();
+        if (revenueRouter_ == address(0)) revert ZeroAddress();
 
         __ERC20_init(name_, symbol_);
         __ERC20Permit_init(name_);
         __ERC20Wrapper_init(govToken_);
         __ERC20Votes_init();
         rewardsToken = rewardsToken_;
-        rewardsDistribution = rewardsDistribution_;
+        revenueRouter = IRevenueDistributor(revenueRouter_);
     }
 
-    modifier onlyRewardsDistribution() {
-        require(msg.sender == rewardsDistribution, "Caller is not RewardsDistribution contract");
+    modifier onlyRevenueRouter() {
+        require(msg.sender == address(revenueRouter), "Caller is not RevenueRouter contract");
         _;
     }
 
     modifier updateReward(address account) {
+        // Settle pending revenue against the pre-action supply before checkpointing the account.
+        revenueRouter.distribute();
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
@@ -129,8 +132,8 @@ contract StakedGovToken is
     }
 
     /// @notice Immediately accrues a received reward to the current stGOV supply.
-    /// @dev The rewards distribution contract must transfer the reward tokens before notifying.
-    function notifyRewardAmount(uint256 reward) external onlyRewardsDistribution {
+    /// @dev The revenue router must transfer the reward tokens before notifying.
+    function notifyRewardAmount(uint256 reward) external onlyRevenueRouter {
         uint256 supply = totalSupply();
         if (supply == 0) revert NoStakedSupply();
 

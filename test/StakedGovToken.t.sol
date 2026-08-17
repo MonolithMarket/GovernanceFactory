@@ -12,9 +12,16 @@ contract StakedGovTokenTest is Test, CloneTestUtils {
     event RewardAdded(uint256 reward);
     event RewardPaid(address indexed account, uint256 reward);
 
+    error DistributionFailed();
+
     GovToken internal gov;
     MockERC20 internal reward;
     StakedGovToken internal staker;
+
+    uint256 internal pendingReward;
+    uint256 internal treasuryRewards;
+    uint256 internal distributionCalls;
+    bool internal distributionShouldRevert;
 
     address internal alice = address(0xA11CE);
     address internal bob = address(0xB0B);
@@ -65,12 +72,12 @@ contract StakedGovTokenTest is Test, CloneTestUtils {
         assertEq(gov.balanceOf(address(staker)), 0);
     }
 
-    function testOnlyRewardsDistributionCanNotifyRewards() public {
+    function testOnlyRevenueRouterCanNotifyRewards() public {
         _stake(alice, 100 ether);
         reward.mint(address(staker), 30 ether);
 
         vm.prank(alice);
-        vm.expectRevert(bytes("Caller is not RewardsDistribution contract"));
+        vm.expectRevert(bytes("Caller is not RevenueRouter contract"));
         staker.notifyRewardAmount(30 ether);
     }
 
@@ -160,9 +167,120 @@ contract StakedGovTokenTest is Test, CloneTestUtils {
         assertEq(staker.earned(bob), 15 ether);
     }
 
+    function testDepositDistributesPendingRewardBeforeMinting() public {
+        _stake(alice, 100 ether);
+        _queueReward(30 ether);
+
+        _stake(bob, 100 ether);
+
+        assertEq(staker.earned(alice), 30 ether);
+        assertEq(staker.earned(bob), 0);
+        assertEq(reward.balanceOf(address(staker)), 30 ether);
+    }
+
+    function testTopUpDoesNotApplyPendingRewardToNewStake() public {
+        _stake(alice, 100 ether);
+        _stake(bob, 100 ether);
+        _queueReward(20 ether);
+
+        _stake(alice, 100 ether);
+
+        assertEq(staker.balanceOf(alice), 200 ether);
+        assertEq(staker.earned(alice), 10 ether);
+        assertEq(staker.earned(bob), 10 ether);
+    }
+
+    function testWithdrawDistributesPendingRewardBeforeBurning() public {
+        _stake(alice, 100 ether);
+        _stake(bob, 100 ether);
+        _queueReward(20 ether);
+
+        vm.prank(alice);
+        staker.withdraw();
+
+        assertEq(staker.balanceOf(alice), 0);
+        assertEq(staker.earned(alice), 10 ether);
+        assertEq(staker.earned(bob), 10 ether);
+    }
+
+    function testGetRewardDistributesAndPaysPendingReward() public {
+        _stake(alice, 100 ether);
+        _queueReward(30 ether);
+
+        vm.prank(alice);
+        staker.getReward();
+
+        assertEq(reward.balanceOf(alice), 30 ether);
+        assertEq(staker.earned(alice), 0);
+    }
+
+    function testRewardUpdatesSucceedWithNothingToDistribute() public {
+        _stake(alice, 100 ether);
+        uint256 callsBefore = distributionCalls;
+
+        _stake(bob, 100 ether);
+        vm.prank(bob);
+        staker.withdrawTo(bob, 10 ether);
+        vm.prank(bob);
+        staker.getReward();
+
+        assertEq(distributionCalls, callsBefore + 3);
+    }
+
+    function testDistributionFailureRevertsEveryRewardUpdate() public {
+        _stake(alice, 100 ether);
+        distributionShouldRevert = true;
+
+        vm.startPrank(bob);
+        gov.approve(address(staker), 100 ether);
+        vm.expectRevert(DistributionFailed.selector);
+        staker.depositFor(bob, 100 ether);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        vm.expectRevert(DistributionFailed.selector);
+        staker.withdrawTo(alice, 10 ether);
+
+        vm.prank(alice);
+        vm.expectRevert(DistributionFailed.selector);
+        staker.getReward();
+    }
+
+    function testFirstDepositRoutesPendingRewardAwayFromStaking() public {
+        _queueReward(30 ether);
+
+        _stake(alice, 100 ether);
+
+        assertEq(treasuryRewards, 30 ether);
+        assertEq(staker.earned(alice), 0);
+        assertEq(reward.balanceOf(address(staker)), 0);
+    }
+
+    function distribute() external returns (uint256 treasuryAmount, uint256 govStakingAmount) {
+        if (distributionShouldRevert) revert DistributionFailed();
+        distributionCalls++;
+
+        uint256 amount = pendingReward;
+        pendingReward = 0;
+        if (amount == 0) return (0, 0);
+
+        if (staker.totalSupply() == 0) {
+            treasuryRewards += amount;
+            return (amount, 0);
+        }
+
+        reward.mint(address(staker), amount);
+        staker.notifyRewardAmount(amount);
+        return (0, amount);
+    }
+
     function _notifyReward(uint256 amount) internal {
         reward.mint(address(staker), amount);
         staker.notifyRewardAmount(amount);
+    }
+
+    function _queueReward(uint256 amount) internal {
+        pendingReward += amount;
     }
 
     function _stake(address account, uint256 amount) internal {

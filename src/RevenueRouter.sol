@@ -6,8 +6,9 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
 
 import {IMonolithLender} from "./interfaces/IMonolith.sol";
 import {INotifiableRewardReceiver} from "./interfaces/INotifiableRewardReceiver.sol";
+import {IRevenueDistributor} from "./interfaces/IRevenueDistributor.sol";
 
-contract RevenueRouter is OwnableUpgradeable {
+contract RevenueRouter is OwnableUpgradeable, IRevenueDistributor {
     using SafeERC20 for IERC20;
 
     uint16 public constant MAX_BPS = 10_000;
@@ -55,7 +56,7 @@ contract RevenueRouter is OwnableUpgradeable {
         lender.acceptOperator();
     }
 
-    function distribute() external returns (uint256 treasuryAmount, uint256 govStakingAmount) {
+    function distribute() external override returns (uint256 treasuryAmount, uint256 govStakingAmount) {
         lender.pullLocalReserves();
 
         uint256 amount = coin.balanceOf(address(this));

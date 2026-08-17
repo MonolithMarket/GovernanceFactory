@@ -398,7 +398,7 @@ contract CoinDAOFactoryTest is Test {
         assertEq(address(governor.token()), deployment.staker);
         assertEq(governor.quorumNumerator(), factory.GOVERNOR_QUORUM_NUMERATOR());
         assertEq(governor.quorumDenominator(), 1_000);
-        assertEq(staker.rewardsDistribution(), deployment.revenueRouter);
+        assertEq(address(staker.revenueRouter()), deployment.revenueRouter);
         assertEq(Ownable(deployment.revenueRouter).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.treasuryVesting)).owner(), deployment.timelock);
         assertEq(VestingWallet(payable(deployment.monolithVesting)).owner(), monolithRecipient);
@@ -458,7 +458,7 @@ contract CoinDAOFactoryTest is Test {
         assertEq(lender.pendingOperator(), address(0));
         assertEq(lender.manager(), existingManager);
         assertEq(Ownable(deployment.revenueRouter).owner(), deployment.timelock);
-        assertEq(StakedGovToken(deployment.staker).rewardsDistribution(), deployment.revenueRouter);
+        assertEq(address(StakedGovToken(deployment.staker).revenueRouter()), deployment.revenueRouter);
 
         GovToken govToken = GovToken(deployment.govToken);
         assertEq(govToken.balanceOf(deployment.timelock), 0);
@@ -756,12 +756,12 @@ contract CoinDAOFactoryTest is Test {
         assertEq(governor.quorum(firstTimepoint), 1);
     }
 
-    function testDeployTwiceWiresEachRevenueRouterAsRewardsDistribution() public {
+    function testDeployTwiceWiresEachStakedGovTokenToItsRevenueRouter() public {
         CoinDAOFactory.Deployment memory first = _deploy(1_000, CoinDAOFactory.StakingTokenChoice.Coin);
         CoinDAOFactory.Deployment memory second = _deploy(0, CoinDAOFactory.StakingTokenChoice.SCoin);
 
-        assertEq(StakedGovToken(first.staker).rewardsDistribution(), first.revenueRouter);
-        assertEq(StakedGovToken(second.staker).rewardsDistribution(), second.revenueRouter);
+        assertEq(address(StakedGovToken(first.staker).revenueRouter()), first.revenueRouter);
+        assertEq(address(StakedGovToken(second.staker).revenueRouter()), second.revenueRouter);
         assertNotEq(first.revenueRouter, second.revenueRouter);
     }
 

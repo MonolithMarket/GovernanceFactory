@@ -344,49 +344,58 @@ contract CoinDAOFactory {
         emit CoinDAOAttached(deployments.length - 1, lenderAddress, previousOperator);
     }
 
+    /// @dev Completes a CoinDAO launch after its deployment key has been reserved and this factory controls the lender.
+    /// Any failure reverts the full launch, including the key reservation and lender-operator changes made by the caller.
     function _deployCoinDAO(
         Deployment memory deployment,
-        GovLaunchParams memory params,
-        bytes32 key,
+        GovLaunchParams memory govParams,
+        bytes32 deploymentKey_,
         address creator,
         bytes32 userSalt
     ) internal returns (Deployment memory) {
+        // Phase 1: reserve the lender before external calls and calculate the complete fixed-supply allocation.
         if (hasCoinDAO[deployment.lender]) revert CoinDAOAlreadyExists(deployment.lender);
         hasCoinDAO[deployment.lender] = true;
 
-        AllocationAmounts memory allocation = allocationFor(params.deployerStakeBps);
+        AllocationAmounts memory allocation = allocationFor(govParams.deployerStakeBps);
 
-        // Deploy GOV, the timelock, staking, and the governor that will control the launch.
-        GovToken govToken =
-            GovToken(Clones.cloneDeterministic(govTokenImplementation, _componentSalt(key, _GOV_TOKEN_COMPONENT)));
-        govToken.initialize(params.govTokenName, params.govTokenSymbol, address(this));
+        // Phase 2: deploy and initialize the governance system. Each clone should be initialized immediately after creation.
+        GovToken govToken = GovToken(
+            Clones.cloneDeterministic(govTokenImplementation, _componentSalt(deploymentKey_, _GOV_TOKEN_COMPONENT))
+        );
+        govToken.initialize(govParams.govTokenName, govParams.govTokenSymbol, address(this));
         deployment.govToken = address(govToken);
 
-        address[] memory proposers = new address[](0);
-        address[] memory executors = new address[](1);
-        executors[0] = address(0);
-        TimelockController timelock = TimelockController(
-            payable(CoreDeploymentLib.deployTimelock(
-                    _componentSalt(key, _TIMELOCK_COMPONENT),
-                    DEFAULT_TIMELOCK_DELAY,
-                    proposers,
-                    executors,
-                    address(this)
-                ))
-        );
+        TimelockController timelock;
+        {
+            address[] memory proposers = new address[](0);
+            address[] memory executors = new address[](1);
+            executors[0] = address(0);
+            timelock = TimelockController(
+                payable(CoreDeploymentLib.deployTimelock(
+                        _componentSalt(deploymentKey_, _TIMELOCK_COMPONENT),
+                        DEFAULT_TIMELOCK_DELAY,
+                        proposers,
+                        executors,
+                        address(this)
+                    ))
+            );
+        }
         deployment.timelock = address(timelock);
 
         StakedGovToken staker = StakedGovToken(
-            Clones.cloneDeterministic(stakedGovTokenImplementation, _componentSalt(key, _STAKER_COMPONENT))
+            Clones.cloneDeterministic(stakedGovTokenImplementation, _componentSalt(deploymentKey_, _STAKER_COMPONENT))
         );
         RevenueRouter revenueRouter = RevenueRouter(
-            Clones.cloneDeterministic(revenueRouterImplementation, _componentSalt(key, _REVENUE_ROUTER_COMPONENT))
+            Clones.cloneDeterministic(
+                revenueRouterImplementation, _componentSalt(deploymentKey_, _REVENUE_ROUTER_COMPONENT)
+            )
         );
         staker.initialize(
             IERC20(deployment.govToken),
             IERC20(deployment.coin),
-            string.concat("Staked ", params.govTokenName),
-            string.concat("s", params.govTokenSymbol),
+            string.concat("Staked ", govParams.govTokenName),
+            string.concat("s", govParams.govTokenSymbol),
             address(revenueRouter)
         );
         deployment.staker = address(staker);
@@ -401,10 +410,10 @@ contract CoinDAOFactory {
         );
         deployment.revenueRouter = address(revenueRouter);
 
-        string memory governorName = string.concat(params.govTokenName, " Governor");
+        string memory governorName = string.concat(govParams.govTokenName, " Governor");
         CoinDAOGovernor governor = CoinDAOGovernor(
             payable(GovernorDeploymentLib.deployGovernor(
-                    _componentSalt(key, _GOVERNOR_COMPONENT),
+                    _componentSalt(deploymentKey_, _GOVERNOR_COMPONENT),
                     governorName,
                     IVotes(address(staker)),
                     timelock,
@@ -414,66 +423,72 @@ contract CoinDAOFactory {
         );
         deployment.governor = address(governor);
 
-        // Move governance authority from the factory to the governor/timelock pair.
+        // Phase 3: grant proposal and cancellation authority before permanently removing the factory as timelock admin.
         timelock.grantRole(timelock.PROPOSER_ROLE(), address(governor));
         timelock.grantRole(timelock.CANCELLER_ROLE(), address(governor));
         timelock.renounceRole(timelock.DEFAULT_ADMIN_ROLE(), address(this));
 
-        address stakingToken = params.stakingTokenChoice == StakingTokenChoice.Coin ? deployment.coin : deployment.vault;
+        // Phase 4: deploy the staking-incentive pair against the selected Coin or sCoin token.
+        address stakingToken =
+            govParams.stakingTokenChoice == StakingTokenChoice.Coin ? deployment.coin : deployment.vault;
         deployment.stakingToken = stakingToken;
         StakingRewards coinStakingRewards = StakingRewards(
-            Clones.cloneDeterministic(stakingRewardsImplementation, _componentSalt(key, _STAKING_REWARDS_COMPONENT))
+            Clones.cloneDeterministic(
+                stakingRewardsImplementation, _componentSalt(deploymentKey_, _STAKING_REWARDS_COMPONENT)
+            )
         );
         coinStakingRewards.initialize(stakingToken, address(govToken), address(this), COIN_STAKING_REWARD_DURATION);
         deployment.coinStakingRewards = address(coinStakingRewards);
         StakingRewardsFunder coinStakingRewardsFunder = StakingRewardsFunder(
             Clones.cloneDeterministic(
-                stakingRewardsFunderImplementation, _componentSalt(key, _STAKING_REWARDS_FUNDER_COMPONENT)
+                stakingRewardsFunderImplementation, _componentSalt(deploymentKey_, _STAKING_REWARDS_FUNDER_COMPONENT)
             )
         );
         coinStakingRewardsFunder.initialize(coinStakingRewards, allocation.coinStakingRewards);
         deployment.coinStakingRewardsFunder = address(coinStakingRewardsFunder);
 
-        // Route lender revenue through the staker while leaving future management under timelock control.
+        // Phase 5: atomically route lender revenue through the initialized router, then place router ownership under timelock.
         IMonolithLender(deployment.lender).setPendingOperator(deployment.revenueRouter);
         revenueRouter.acceptLenderOperator();
         revenueRouter.transferOwnership(deployment.timelock);
 
-        // Prepare vesting recipients before distributing the fixed GOV supply.
+        // Phase 6: create every required vesting recipient before distributing GOV; all schedules share one start time.
+        uint64 vestingStart = uint64(block.timestamp);
         CoinDAOVestingWallet treasuryVesting = CoinDAOVestingWallet(
             payable(Clones.cloneDeterministic(
-                    vestingWalletImplementation, _componentSalt(key, _TREASURY_VESTING_COMPONENT)
+                    vestingWalletImplementation, _componentSalt(deploymentKey_, _TREASURY_VESTING_COMPONENT)
                 ))
         );
-        treasuryVesting.initialize(deployment.timelock, uint64(block.timestamp), FOUR_YEARS);
+        treasuryVesting.initialize(deployment.timelock, vestingStart, FOUR_YEARS);
         deployment.treasuryVesting = address(treasuryVesting);
         CoinDAOVestingWallet monolithVesting = CoinDAOVestingWallet(
             payable(Clones.cloneDeterministic(
-                    vestingWalletImplementation, _componentSalt(key, _MONOLITH_VESTING_COMPONENT)
+                    vestingWalletImplementation, _componentSalt(deploymentKey_, _MONOLITH_VESTING_COMPONENT)
                 ))
         );
-        monolithVesting.initialize(monolithBeneficiary, uint64(block.timestamp), FOUR_YEARS);
+        monolithVesting.initialize(monolithBeneficiary, vestingStart, FOUR_YEARS);
         deployment.monolithVesting = address(monolithVesting);
         CoinDAOVestingWallet deployerVesting;
         if (allocation.deployerVesting != 0) {
             deployerVesting = CoinDAOVestingWallet(
                 payable(Clones.cloneDeterministic(
-                        vestingWalletImplementation, _componentSalt(key, _DEPLOYER_VESTING_COMPONENT)
+                        vestingWalletImplementation, _componentSalt(deploymentKey_, _DEPLOYER_VESTING_COMPONENT)
                     ))
             );
-            deployerVesting.initialize(params.deployerRecipient, uint64(block.timestamp), FOUR_YEARS);
+            deployerVesting.initialize(govParams.deployerRecipient, vestingStart, FOUR_YEARS);
             deployment.deployerVesting = address(deployerVesting);
         }
 
+        // Phase 7: allocate the entire fixed GOV supply, activate the first rewards tranche, and lock reward ownership.
         IERC20 govTokenErc20 = IERC20(address(govToken));
         govTokenErc20.safeTransfer(address(coinStakingRewardsFunder), allocation.coinStakingRewards);
         coinStakingRewards.setRewardsDistribution(address(coinStakingRewardsFunder));
         coinStakingRewardsFunder.fundNextTranche();
         coinStakingRewards.renounceOwnership();
 
-        // Issue the liquid allocation to the deployer when specified, otherwise retain it in the treasury.
+        // A missing deployer recipient sends only the liquid allocation to the timelock; vested deployer stake is disallowed.
         address immediateRecipient =
-            params.deployerRecipient == address(0) ? deployment.timelock : params.deployerRecipient;
+            govParams.deployerRecipient == address(0) ? deployment.timelock : govParams.deployerRecipient;
         govTokenErc20.safeTransfer(immediateRecipient, allocation.immediateAllocation);
         govTokenErc20.safeTransfer(address(treasuryVesting), allocation.treasuryVested);
         govTokenErc20.safeTransfer(address(monolithVesting), allocation.monolithVesting);
@@ -481,12 +496,13 @@ contract CoinDAOFactory {
             govTokenErc20.safeTransfer(address(deployerVesting), allocation.deployerVesting);
         }
 
-        // Store and emit the deployment map for callers and indexers.
+        // Phase 8: use one stable id for both storage indexes and all deployment events.
+        uint256 deploymentId = deployments.length;
         deployments.push(deployment);
-        deploymentKeyForId.push(key);
-        emit DeploymentKeyUsed(deployments.length - 1, key, creator, userSalt);
+        deploymentKeyForId.push(deploymentKey_);
+        emit DeploymentKeyUsed(deploymentId, deploymentKey_, creator, userSalt);
         emit CoinDAODeployed(
-            deployments.length - 1,
+            deploymentId,
             deployment.lender,
             deployment.coin,
             address(monolithFactory),

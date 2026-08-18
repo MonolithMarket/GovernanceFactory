@@ -75,9 +75,12 @@ contract StakedGovToken is
         _;
     }
 
-    modifier updateReward(address account) {
-        // Settle pending revenue against the pre-action supply before checkpointing the account.
+    modifier harvestYield() {
         revenueRouter.distribute();
+        _;
+    }
+
+    modifier updateReward(address account) {
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
@@ -93,6 +96,7 @@ contract StakedGovToken is
         public
         override
         nonReentrant
+        harvestYield
         updateReward(account)
         returns (bool)
     {

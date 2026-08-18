@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -10,6 +11,8 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /// GitHub: https://github.com/Synthetixio/synthetix/blob/develop/contracts/StakingRewards.sol
 /// Verified deployment: https://etherscan.io/address/0x8302fe9f0c509a996573d3cc5b0d5d51e4fdd5ec
 /// Original Synthetix snippets are included next to adapted methods; identical methods are marked.
+/// @dev Staking and reward tokens must transfer exact amounts and maintain stable account balances.
+/// Fee-on-transfer and rebasing tokens are unsupported.
 contract StakingRewards is OwnableUpgradeable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 

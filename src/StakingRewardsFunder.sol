@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -8,6 +9,8 @@ import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.s
 import {StakingRewards} from "./StakingRewards.sol";
 
 /// @notice Permissionless fixed-schedule funder for a StakingRewards contract.
+/// @dev The reward token must transfer exact amounts and maintain stable account balances.
+/// Fee-on-transfer and rebasing tokens are unsupported.
 contract StakingRewardsFunder is Initializable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -57,7 +60,7 @@ contract StakingRewardsFunder is Initializable, ReentrancyGuard {
         revert InvalidTranche(tranche);
     }
 
-    function trancheAmounts(uint256 tranche) external view returns (uint256) {
+    function trancheAmount(uint256 tranche) external view returns (uint256) {
         if (tranche >= TRANCHE_COUNT) revert InvalidTranche(tranche);
         return _trancheAmount(tranche);
     }

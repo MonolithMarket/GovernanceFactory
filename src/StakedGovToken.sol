@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -21,6 +22,8 @@ import {IRevenueDistributor} from "./interfaces/IRevenueDistributor.sol";
 
 /// @notice Non-transferable staked GOV receipt token with delegated voting and Coin rewards.
 /// @dev Each reward notification is accrued immediately to the stGOV supply that exists at that moment.
+/// The underlying GOV and reward token must transfer exact amounts and maintain stable account balances;
+/// fee-on-transfer and rebasing tokens are unsupported.
 contract StakedGovToken is
     ERC20WrapperUpgradeable,
     ERC20PermitUpgradeable,
@@ -90,6 +93,10 @@ contract StakedGovToken is
 
     function decimals() public view override(ERC20Upgradeable, ERC20WrapperUpgradeable) returns (uint8) {
         return super.decimals();
+    }
+
+    function totalSupply() public view override(ERC20Upgradeable, INotifiableRewardReceiver) returns (uint256) {
+        return super.totalSupply();
     }
 
     function depositFor(address account, uint256 value)

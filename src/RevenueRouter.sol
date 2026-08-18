@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -8,6 +9,12 @@ import {IMonolithLender} from "./interfaces/IMonolith.sol";
 import {INotifiableRewardReceiver} from "./interfaces/INotifiableRewardReceiver.sol";
 import {IRevenueDistributor} from "./interfaces/IRevenueDistributor.sol";
 
+/// @notice Pulls Lender reserves and routes Coin revenue between staked GOV and the treasury.
+/// @dev This contract is intentionally the permanent operator of its paired Lender. It deliberately
+/// does not expose a call to `setPendingOperator`, so neither its owner nor the timelock can migrate
+/// the operator role after deployment. Governance retains only the manager and revenue-split controls.
+/// @dev Coin must transfer the exact requested amount and maintain stable account balances.
+/// Fee-on-transfer and rebasing tokens are unsupported.
 contract RevenueRouter is OwnableUpgradeable, IRevenueDistributor {
     using SafeERC20 for IERC20;
 
@@ -52,6 +59,8 @@ contract RevenueRouter is OwnableUpgradeable, IRevenueDistributor {
         govStakingBps = govStakingBps_;
     }
 
+    /// @notice Accepts the one-time operator nomination used while wiring the CoinDAO deployment.
+    /// @dev This function cannot nominate or hand the operator role to another address.
     function acceptLenderOperator() external onlyOwner {
         lender.acceptOperator();
     }
@@ -60,7 +69,7 @@ contract RevenueRouter is OwnableUpgradeable, IRevenueDistributor {
         lender.pullLocalReserves();
 
         uint256 amount = coin.balanceOf(address(this));
-        if (IERC20(address(govStaking)).totalSupply() != 0) {
+        if (govStaking.totalSupply() != 0) {
             govStakingAmount = (amount * govStakingBps) / MAX_BPS;
         }
         treasuryAmount = amount - govStakingAmount;

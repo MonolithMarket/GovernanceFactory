@@ -31,9 +31,9 @@ contract StakingRewardsFunderTest is Test, CloneTestUtils {
         assertEq(dustFunder.trancheBps(1), 2_750);
         assertEq(dustFunder.trancheBps(2), 2_250);
         assertEq(dustFunder.trancheBps(3), 1_750);
-        assertEq(dustFunder.trancheAmounts(0), 32);
-        assertEq(dustFunder.trancheAmounts(1), 27);
-        assertEq(dustFunder.trancheAmounts(2), 22);
+        assertEq(dustFunder.trancheAmount(0), 32);
+        assertEq(dustFunder.trancheAmount(1), 27);
+        assertEq(dustFunder.trancheAmount(2), 22);
 
         for (uint256 i; i < 4; ++i) {
             vm.prank(alice);

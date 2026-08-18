@@ -35,8 +35,10 @@ contract RevenueRouterTest is Test, CloneTestUtils {
     }
 
     function testFirstDepositRoutesPendingRevenueToTreasury() public {
+        assertEq(router.govStaking().totalSupply(), 0);
         lender.setAccruedLocalReserves(30 ether);
         _stake(alice, 100 ether);
+        assertEq(router.govStaking().totalSupply(), 100 ether);
         assertEq(lender.accruedLocalReserves(), 0);
         assertEq(coin.balanceOf(treasury), 30 ether);
         assertEq(staker.earned(alice), 0);

@@ -116,7 +116,7 @@ contract CoinDAOFactoryTest is CoinDAOTestBase {
         CoinDAOFactory.AllocationAmounts memory allocation = factory.allocationFor(1_000);
         GovToken govToken = GovToken(deployment.govToken);
         StakingRewardsFunder funder = StakingRewardsFunder(deployment.coinStakingRewardsFunder);
-        uint256 firstTranche = funder.trancheAmounts(0);
+        uint256 firstTranche = funder.trancheAmount(0);
         assertEq(govToken.totalSupply(), factory.GOV_TOKEN_SUPPLY());
         assertEq(govToken.balanceOf(deployment.coinStakingRewards), firstTranche);
         assertEq(govToken.balanceOf(deployment.coinStakingRewardsFunder), allocation.coinStakingRewards - firstTranche);

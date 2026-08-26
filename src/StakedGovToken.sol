@@ -124,6 +124,15 @@ contract StakedGovToken is
         return withdrawTo(msg.sender, balanceOf(msg.sender));
     }
 
+    /// @notice Harvests pending revenue, withdraws the caller's full stake, and pays their rewards.
+    /// @dev This function reverts atomically if harvesting, withdrawing, or paying rewards fails.
+    /// Use `withdraw` to recover the underlying GOV without harvesting or claiming rewards.
+    function harvestAndWithdraw() external nonReentrant harvestYield updateReward(msg.sender) returns (bool) {
+        bool success = super.withdrawTo(msg.sender, balanceOf(msg.sender));
+        _payReward(msg.sender);
+        return success;
+    }
+
     function rewardPerToken() public view returns (uint256) {
         return rewardPerTokenStored;
     }
@@ -133,12 +142,24 @@ contract StakedGovToken is
             + rewards[account];
     }
 
+    /// @notice Pays the caller's already-accrued rewards without harvesting pending revenue.
+    /// @dev This remains available if the external revenue distribution mechanism is unavailable.
     function getReward() public nonReentrant updateReward(msg.sender) {
-        uint256 reward = rewards[msg.sender];
+        _payReward(msg.sender);
+    }
+
+    /// @notice Harvests pending revenue and pays the caller's resulting accrued rewards.
+    /// @dev This function reverts atomically if harvesting or paying rewards fails.
+    function harvestAndGetReward() external nonReentrant harvestYield updateReward(msg.sender) {
+        _payReward(msg.sender);
+    }
+
+    function _payReward(address account) internal {
+        uint256 reward = rewards[account];
         if (reward > 0) {
-            rewards[msg.sender] = 0;
-            rewardsToken.safeTransfer(msg.sender, reward);
-            emit RewardPaid(msg.sender, reward);
+            rewards[account] = 0;
+            rewardsToken.safeTransfer(account, reward);
+            emit RewardPaid(account, reward);
         }
     }
 

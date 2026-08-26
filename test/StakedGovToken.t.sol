@@ -136,7 +136,7 @@ contract StakedGovTokenTest is Test, CloneTestUtils {
         assertEq(staker.earned(bob), 10 ether);
     }
 
-    function testWithdrawAndClaimDoNotHarvestPendingReward() public {
+    function testPlainWithdrawDoesNotHarvestPendingReward() public {
         _stake(alice, 100 ether);
         _stake(bob, 100 ether);
         uint256 callsBefore = distributionCalls;
@@ -148,17 +148,40 @@ contract StakedGovTokenTest is Test, CloneTestUtils {
         assertEq(staker.earned(bob), 0);
         assertEq(pendingReward, 20 ether);
         assertEq(distributionCalls, callsBefore);
+    }
 
-        _queueReward(30 ether);
+    function testGetRewardClaimsAccruedRewardWithoutHarvestingPendingReward() public {
+        _stake(alice, 100 ether);
+        _stake(bob, 100 ether);
+        _notifyReward(10 ether);
+        uint256 callsBefore = distributionCalls;
+
+        _queueReward(20 ether);
         vm.prank(bob);
         staker.getReward();
-        assertEq(reward.balanceOf(bob), 0);
+        assertEq(reward.balanceOf(bob), 5 ether);
+        assertEq(staker.earned(alice), 5 ether);
         assertEq(staker.earned(bob), 0);
-        assertEq(pendingReward, 50 ether);
+        assertEq(pendingReward, 20 ether);
         assertEq(distributionCalls, callsBefore);
     }
 
-    function testOnlyDepositsHarvestYield() public {
+    function testHarvestAndGetRewardHarvestsPendingReward() public {
+        _stake(alice, 100 ether);
+        _stake(bob, 100 ether);
+        uint256 callsBefore = distributionCalls;
+
+        _queueReward(20 ether);
+        vm.prank(bob);
+        staker.harvestAndGetReward();
+        assertEq(reward.balanceOf(bob), 10 ether);
+        assertEq(staker.earned(alice), 10 ether);
+        assertEq(staker.earned(bob), 0);
+        assertEq(pendingReward, 0);
+        assertEq(distributionCalls, callsBefore + 1);
+    }
+
+    function testDepositsAndExplicitHarvestPathsHarvestYieldButPlainPathsDoNot() public {
         _stake(alice, 100 ether);
         uint256 callsBefore = distributionCalls;
         _stake(bob, 100 ether);
@@ -169,9 +192,44 @@ contract StakedGovTokenTest is Test, CloneTestUtils {
         vm.prank(bob);
         staker.getReward();
         assertEq(distributionCalls, callsBefore + 1);
+        vm.prank(bob);
+        staker.harvestAndGetReward();
+        assertEq(distributionCalls, callsBefore + 2);
     }
 
-    function testDistributorFailureOnlyRevertsDeposits() public {
+    function testHarvestAndWithdrawHarvestsFullStakeAndClaimsReward() public {
+        _stake(alice, 100 ether);
+        _stake(bob, 100 ether);
+        _queueReward(20 ether);
+
+        vm.prank(alice);
+        bool success = staker.harvestAndWithdraw();
+
+        assertTrue(success);
+        assertEq(staker.balanceOf(alice), 0);
+        assertEq(staker.totalSupply(), 100 ether);
+        assertEq(gov.balanceOf(alice), 1_000 ether);
+        assertEq(reward.balanceOf(alice), 10 ether);
+        assertEq(staker.earned(alice), 0);
+        assertEq(staker.earned(bob), 10 ether);
+        assertEq(pendingReward, 0);
+    }
+
+    function testLastStakerHarvestAndWithdrawClaimsRevenueBeforeSupplyReachesZero() public {
+        _stake(alice, 100 ether);
+        _queueReward(30 ether);
+
+        vm.prank(alice);
+        staker.harvestAndWithdraw();
+
+        assertEq(staker.totalSupply(), 0);
+        assertEq(gov.balanceOf(alice), 1_000 ether);
+        assertEq(reward.balanceOf(alice), 30 ether);
+        assertEq(treasuryRewards, 0);
+        assertEq(pendingReward, 0);
+    }
+
+    function testDistributorFailureRevertsHarvestingPathsButPlainWithdrawStillWorks() public {
         _stake(alice, 100 ether);
         _notifyReward(10 ether);
         distributionShouldRevert = true;
@@ -183,13 +241,25 @@ contract StakedGovTokenTest is Test, CloneTestUtils {
         vm.stopPrank();
 
         vm.prank(alice);
-        staker.withdrawTo(alice, 10 ether);
-        assertEq(gov.balanceOf(alice), 910 ether);
+        vm.expectRevert(DistributionFailed.selector);
+        staker.harvestAndGetReward();
+
+        vm.prank(alice);
+        vm.expectRevert(DistributionFailed.selector);
+        staker.harvestAndWithdraw();
+        assertEq(gov.balanceOf(alice), 900 ether);
+        assertEq(staker.balanceOf(alice), 100 ether);
         assertEq(staker.earned(alice), 10 ether);
 
         vm.prank(alice);
         staker.getReward();
         assertEq(reward.balanceOf(alice), 10 ether);
+
+        vm.prank(alice);
+        staker.withdraw();
+        assertEq(gov.balanceOf(alice), 1_000 ether);
+        assertEq(staker.balanceOf(alice), 0);
+        assertEq(staker.earned(alice), 0);
     }
 
     function distribute() external returns (uint256 treasuryAmount, uint256 govStakingAmount) {

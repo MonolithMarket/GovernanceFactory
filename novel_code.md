@@ -42,9 +42,9 @@ itself, but whether each composition uses the right parameters and ownership han
 ### `src/StakedGovToken.sol`
 
 The staked GOV token uses the OpenZeppelin wrapper approach: GOV holders deposit raw GOV into an
-ERC20Wrapper and receive non-transferable `sGOV`. The governor reads votes from `sGOV`, so only
-staked GOV can vote. Holders still need to delegate `sGOV` to activate vote checkpoints, matching
-the default OZ `ERC20Votes` model.
+ERC20Wrapper and receive non-transferable `sGOV`. The CoinDAO governor reads votes from `sGOV`, so
+only staked GOV can vote in that governor. Holders still need to delegate `sGOV` to activate vote
+checkpoints, matching the default OZ `ERC20Votes` model.
 
 Each RevenueRouter notification immediately increases a global reward-per-token accumulator.
 Project-specific behavior is:
@@ -68,8 +68,9 @@ mutable duration hooks are removed because the factory uses a fixed launch flow.
 
 ### `src/GovToken.sol`
 
-The raw GOV token is a fixed-supply `ERC20 + ERC20Permit`. It deliberately does not implement
-votes; governance power is created only when GOV is staked into `StakedGovToken`.
+The raw GOV token is a fixed-supply `ERC20 + ERC20Permit + ERC20Votes`. Its delegation and
+historical checkpoints support future governance integrations, but the CoinDAO governor remains
+wired exclusively to `StakedGovToken`.
 
 ### `src/CoinDAOGovernor.sol`
 

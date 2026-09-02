@@ -159,14 +159,19 @@ contract CoinDAOFactoryTest is CoinDAOTestBase {
 
         assertEq(zeroDeployment.stakingToken, zeroDeployment.vault);
         assertEq(zeroDeployment.deployerVesting, address(0));
-        assertEq(zeroPredicted.deployerVesting.code.length, 0);
+        assertEq(zeroPredicted.deployerVesting, address(0));
+        assertEq(zeroDeployment.deployerVesting, zeroPredicted.deployerVesting);
         assertEq(GovToken(zeroDeployment.govToken).balanceOf(zeroDeployment.timelock), allocation.immediateAllocation);
 
         CoinDAOFactory.GovLaunchParams memory recipientParams = _govParams(0, CoinDAOFactory.StakingTokenChoice.Coin);
         recipientParams.deployerRecipient = deployerRecipient;
+        bytes32 recipientSalt = _nextSalt();
+        CoinDAOFactory.PredictedAddresses memory recipientPredicted =
+            factory.predictCoinDAOAddresses(address(this), recipientSalt, recipientParams);
         CoinDAOFactory.Deployment memory recipientDeployment =
-            factory.deploy(_nextSalt(), recipientParams, _monolithParams(), manager);
+            factory.deploy(recipientSalt, recipientParams, _monolithParams(), manager);
         assertEq(recipientDeployment.deployerVesting, address(0));
+        assertEq(recipientPredicted.deployerVesting, address(0));
         assertEq(GovToken(recipientDeployment.govToken).balanceOf(deployerRecipient), allocation.immediateAllocation);
         assertEq(GovToken(recipientDeployment.govToken).balanceOf(recipientDeployment.timelock), 0);
     }
@@ -267,6 +272,14 @@ contract CoinDAOFactoryTest is CoinDAOTestBase {
     function testAllocationRejectsExcessiveDeployerStake() public {
         vm.expectRevert(abi.encodeWithSelector(CoinDAOFactory.DeployerStakeExceedsMaximum.selector, 2_001));
         factory.allocationFor(2_001);
+    }
+
+    function testPredictionRejectsExcessiveDeployerStake() public {
+        CoinDAOFactory.GovLaunchParams memory params = _govParams(0, CoinDAOFactory.StakingTokenChoice.Coin);
+        params.deployerStakeBps = 2_001;
+
+        vm.expectRevert(abi.encodeWithSelector(CoinDAOFactory.DeployerStakeExceedsMaximum.selector, 2_001));
+        factory.predictCoinDAOAddresses(address(this), _nextSalt(), params);
     }
 
     function testDeployRejectsVestedStakeWithoutRecipient() public {

@@ -200,6 +200,7 @@ contract CoinDAOFactory {
         returns (PredictedAddresses memory predicted)
     {
         bytes32 key = deploymentKey(creator, userSalt);
+        AllocationAmounts memory allocation = allocationFor(govParams.deployerStakeBps);
         predicted.govToken = Clones.predictDeterministicAddress(
             govTokenImplementation, _componentSalt(key, _GOV_TOKEN_COMPONENT), address(this)
         );
@@ -242,9 +243,11 @@ contract CoinDAOFactory {
         predicted.monolithVesting = Clones.predictDeterministicAddress(
             vestingWalletImplementation, _componentSalt(key, _MONOLITH_VESTING_COMPONENT), address(this)
         );
-        predicted.deployerVesting = Clones.predictDeterministicAddress(
-            vestingWalletImplementation, _componentSalt(key, _DEPLOYER_VESTING_COMPONENT), address(this)
-        );
+        if (allocation.deployerVesting != 0) {
+            predicted.deployerVesting = Clones.predictDeterministicAddress(
+                vestingWalletImplementation, _componentSalt(key, _DEPLOYER_VESTING_COMPONENT), address(this)
+            );
+        }
     }
 
     function setPendingMonolithBeneficiary(address pendingBeneficiary) external {

@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.26;
+
+interface IMonolithFactory {
+    struct DeployParams {
+        string name;
+        string symbol;
+        address collateral;
+        address psmAsset;
+        address psmVault;
+        address feed;
+        uint256 collateralFactor;
+        uint256 minDebt;
+        uint256 timeUntilImmutability;
+        address operator;
+        address manager;
+        uint64 halfLife;
+        uint16 targetFreeDebtRatioStartBps;
+        uint16 targetFreeDebtRatioEndBps;
+        uint16 redeemFeeBps;
+        uint32 stalenessThreshold;
+        uint16 maxBorrowDeltaBps;
+        uint128 psmVaultMinTotalSupply;
+    }
+
+    function deploy(DeployParams calldata params) external returns (address lender, address coin, address vault);
+    function isDeployed(address lender) external view returns (bool);
+}
+
+interface IMonolithLender {
+    function operator() external view returns (address);
+    function pendingOperator() external view returns (address);
+    function coin() external view returns (address);
+    function vault() external view returns (address);
+    function setPendingOperator(address pendingOperator) external;
+    function acceptOperator() external;
+    function setManager(address manager) external;
+    function pullLocalReserves() external;
+}

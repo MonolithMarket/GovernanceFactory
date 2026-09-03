@@ -130,7 +130,7 @@ Governance should be standard and minimal. The goal is not for token holders to 
 | Day-to-day Lender management | Manager multisig |
 | Cancel guardian | Optional 12-month cancel guardian if simple to implement |
 
-Recommended cadence can remain simple: 1-day voting delay, 5-day voting period, 2-day timelock, low initial quorum suitable for early circulation, and a low proposal threshold. Use standard checkpoint-based vote accounting.
+Recommended cadence can remain simple: 1-day voting delay, 5-day voting period, 2-day timelock, an initial quorum of 0.1% of fixed GOV supply, and a 0.1% proposal threshold. Use standard checkpoint-based vote accounting.
 
 # **9\. Role wiring**
 

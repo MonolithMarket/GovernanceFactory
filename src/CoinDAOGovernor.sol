@@ -11,6 +11,9 @@ import {
     GovernorVotesQuorumFraction
 } from "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+
+import {GOV_TOKEN_SUPPLY as FIXED_GOV_TOKEN_SUPPLY} from "./GovToken.sol";
 
 contract CoinDAOGovernor is
     Governor,
@@ -21,6 +24,8 @@ contract CoinDAOGovernor is
 {
     uint48 public constant DEFAULT_VOTING_DELAY_BLOCKS = 7_200;
     uint32 public constant DEFAULT_VOTING_PERIOD_BLOCKS = 36_000;
+
+    error ERC5805FutureLookup(uint256 timepoint, uint48 clock);
 
     constructor(
         string memory name_,
@@ -62,7 +67,9 @@ contract CoinDAOGovernor is
     }
 
     function quorum(uint256 timepoint) public view override(Governor, GovernorVotesQuorumFraction) returns (uint256) {
-        return super.quorum(timepoint);
+        uint48 currentTimepoint = clock();
+        if (timepoint >= currentTimepoint) revert ERC5805FutureLookup(timepoint, currentTimepoint);
+        return Math.mulDiv(FIXED_GOV_TOKEN_SUPPLY, quorumNumerator(timepoint), quorumDenominator());
     }
 
     function quorumDenominator() public pure override returns (uint256) {

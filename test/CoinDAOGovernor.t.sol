@@ -14,10 +14,11 @@ import {CoinDAOTestBase} from "./helpers/CoinDAOTestBase.sol";
 contract CoinDAOGovernorTest is CoinDAOTestBase {
     event QuorumNumeratorUpdated(uint256 oldQuorumNumerator, uint256 newQuorumNumerator);
 
-    function testDefaultQuorumTracksHistoricalStakedSupplyAndRoundsDown() public {
+    function testDefaultQuorumUsesFixedGovSupply() public {
         CoinDAOFactory.Deployment memory deployment = _deploy(0, CoinDAOFactory.StakingTokenChoice.Coin);
         CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
         StakedGovToken staker = StakedGovToken(deployment.staker);
+        uint256 expectedQuorum = factory.GOV_TOKEN_SUPPLY() / governor.quorumDenominator();
 
         assertEq(governor.quorumNumerator(), factory.GOVERNOR_QUORUM_NUMERATOR());
         assertEq(governor.quorumDenominator(), 1_000);
@@ -25,17 +26,29 @@ contract CoinDAOGovernorTest is CoinDAOTestBase {
         assertEq(governor.votingPeriod(), governor.DEFAULT_VOTING_PERIOD_BLOCKS());
         assertEq(governor.proposalThreshold(), factory.GOVERNOR_PROPOSAL_THRESHOLD());
 
-        _stakeGov(deployment, address(0xA11CE), 1_999);
         vm.roll(staker.clock() + 1);
         uint256 firstTimepoint = staker.clock() - 1;
-        assertEq(staker.getPastTotalSupply(firstTimepoint), 1_999);
-        assertEq(governor.quorum(firstTimepoint), 1);
+        assertEq(staker.getPastTotalSupply(firstTimepoint), 0);
+        assertEq(governor.quorum(firstTimepoint), expectedQuorum);
+
+        _stakeGov(deployment, address(0xA11CE), 1_999);
+        vm.roll(staker.clock() + 1);
+        uint256 secondTimepoint = staker.clock() - 1;
+        assertEq(staker.getPastTotalSupply(secondTimepoint), 1_999);
+        assertEq(governor.quorum(secondTimepoint), expectedQuorum);
 
         _stakeGov(deployment, address(0xB0B), 1_001);
         vm.roll(staker.clock() + 1);
-        uint256 secondTimepoint = staker.clock() - 1;
-        assertEq(governor.quorum(secondTimepoint), 3);
-        assertEq(governor.quorum(firstTimepoint), 1);
+        uint256 thirdTimepoint = staker.clock() - 1;
+        assertEq(staker.getPastTotalSupply(thirdTimepoint), 3_000);
+        assertEq(governor.quorum(thirdTimepoint), expectedQuorum);
+        assertEq(governor.quorum(firstTimepoint), expectedQuorum);
+
+        uint48 currentTimepoint = governor.clock();
+        vm.expectRevert(
+            abi.encodeWithSelector(CoinDAOGovernor.ERC5805FutureLookup.selector, currentTimepoint, currentTimepoint)
+        );
+        governor.quorum(currentTimepoint);
     }
 
     function testQuorumUpdateRejectsDirectCalls() public {
@@ -61,6 +74,8 @@ contract CoinDAOGovernorTest is CoinDAOTestBase {
 
         assertEq(governor.quorumNumerator(historicalTimepoint), oldNumerator);
         assertEq(governor.quorumNumerator(governor.clock() - 1), newNumerator);
+        assertEq(governor.quorum(historicalTimepoint), factory.GOV_TOKEN_SUPPLY() / 1_000);
+        assertEq(governor.quorum(governor.clock() - 1), (factory.GOV_TOKEN_SUPPLY() * newNumerator) / 1_000);
 
         (targets, values, calldatas, descriptionHash) =
             _passAndQueueQuorumProposal(deployment, 1_001, "Reject excessive quorum");

@@ -80,12 +80,11 @@ GovernorVotesQuorumFraction, and GovernorTimelockControl. The project-specific b
 - Voting delay: 7,200 blocks.
 - Voting period: 36,000 blocks.
 - Proposal threshold: 0.1% of fixed GOV supply, supplied by the factory.
-- Initial quorum: 0.1% of historical staked GOV supply, supplied by the factory as numerator `1`.
+- Initial quorum: 0.1% of the fixed GOV supply, supplied by the factory as numerator `1`.
 
 The governor uses OZ `GovernorVotesQuorumFraction` with a denominator of 1,000. Governance may
-update the numerator between 0 and 1,000. Both the numerator and `sGOV` total supply are read at a
-proposal's voting snapshot, so subsequent quorum updates or staking changes do not affect it.
-Because quorum is a fraction of staked supply, the absolute vote requirement falls when less GOV is staked.
+update the numerator between 0 and 1,000. The numerator is read at a proposal's voting snapshot,
+while the quorum base remains the fixed 10,000,000 GOV supply, so staking and unstaking do not change quorum.
 
 ## Novel Code
 

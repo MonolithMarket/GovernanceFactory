@@ -102,7 +102,10 @@ The main risks are misallocation, incomplete initialization, and incomplete priv
 
 The router receives Coin reserves from the Lender, splits them between `sGOV` rewards and the
 treasury, and notifies the reward receiver after transferring rewards. If no stGOV exists, it
-sends the full amount to the treasury. It also exposes timelock-managed Lender manager replacement.
+sends the full amount to the treasury. It also exposes timelock-managed Lender manager replacement,
+local reserve fee updates, and early immutability enablement. The latter two actions forward directly
+to the Lender, which enforces its limits and emits its events. Early immutability freezes half-life,
+target debt ratio, and borrowing rounding-limit changes; local reserve fees remain adjustable.
 The fund-routing and cross-contract authority should be audited closely.
 
 ### `src/StakingRewardsFunder.sol`
@@ -121,7 +124,7 @@ the external Monolith contracts exactly.
 
 1. `CoinDAOFactory.sol`: allocation math and privilege wiring.
 2. `StakedGovToken.sol`: distribution snapshots, rounding, non-transferability, and voting integration.
-3. `RevenueRouter.sol`: revenue split and Lender manager authority.
+3. `RevenueRouter.sol`: revenue split and Lender manager, local reserve fee, and early immutability authority.
 4. `StakingRewardsFunder.sol`: tranche gating and final sweep.
 5. `StakingRewards.sol`: Synthetix port and removed hooks.
 6. `CoinDAOGovernor.sol` and `GovToken.sol`: parameter choices and governance assumptions.

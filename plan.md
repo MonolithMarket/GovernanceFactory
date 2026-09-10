@@ -12,7 +12,7 @@ This version simplifies the CoinDAO Factory design around a small number of stan
 * **Optional deployer stake:** deployer may set a 0% to 20% GovToken allocation at launch, vested linearly over 4 years.  
 * **Default CoinStakingRewards:** 65% of supply at 0% deployer stake, reduced pro rata as deployer stake increases; deployer chooses whether staking token is Coin or sCoin.  
 * **GovStaking retained:** GovToken stakers receive Coin revenue accrued at each distribution and receive the voting receipt token.
-* **Minimal governance powers:** governance controls treasury, RevenueRouter settings, and can replace the Lender manager.  
+* **Minimal governance powers:** governance controls treasury, RevenueRouter settings, Lender manager replacement, the local reserve fee, and early immutability enablement.
 * **Operational management remains simple:** the Lender manager can be a multisig for day-to-day experimentation and management.  
 * **Use off-the-shelf code where possible:** OpenZeppelin-style ERC20Votes, Governor, Timelock, and vesting primitives should be used where practical.
 
@@ -113,8 +113,15 @@ Required governance-controlled functions should be limited to the essentials:
 
 * setGovStakingBps(uint16 newBps)  
 * setManager(address newManager) to replace the Lender manager if needed  
+* setLocalReserveFeeBps(uint256 newFeeBps) to set the Lender's local reserve fee from 0 to 1,000 bps
+* enableImmutabilityNow() to permanently freeze deadline-gated Lender parameters before their scheduled deadline
 * optional setTreasury / setGovStaking address updates if not made immutable  
 * optional operator handoff / recovery function if devs want a safe upgrade path
+
+The local reserve fee and early immutability actions execute through Governor -> Timelock -> RevenueRouter -> Lender.
+The Lender enforces their limits and emits their events. It accrues interest before applying a new local reserve fee.
+Early immutability sets the deadline to the execution timestamp, freezing half-life, target debt ratio, and borrowing
+rounding-limit changes. Local reserve fees and manager replacement remain available after immutability.
 
 # **8\. Governance model**
 
@@ -125,8 +132,8 @@ Governance should be standard and minimal. The goal is not for token holders to 
 | Voting token | stGOV |
 | Execution | Timelock-controlled arbitrary execution |
 | Treasury control | Governor \-\> Timelock controls Treasury |
-| Revenue control | Governance can update govStakingBps |
-| Protocol control | Governance can change the Lender manager |
+| Revenue control | Governance can update govStakingBps and the Lender's local reserve fee |
+| Protocol control | Governance can change the Lender manager and enable immutability early |
 | Day-to-day Lender management | Manager multisig |
 | Cancel guardian | Optional 12-month cancel guardian if simple to implement |
 

@@ -12,7 +12,8 @@ import {IRevenueDistributor} from "./interfaces/IRevenueDistributor.sol";
 /// @notice Pulls Lender reserves and routes Coin revenue between staked GOV and the treasury.
 /// @dev This contract is intentionally the permanent operator of its paired Lender. It deliberately
 /// does not expose a call to `setPendingOperator`, so neither its owner nor the timelock can migrate
-/// the operator role after deployment. Governance retains only the manager and revenue-split controls.
+/// the operator role after deployment. Governance controls the manager, revenue split, local reserve fee,
+/// and early immutability enablement.
 /// @dev Coin must transfer the exact requested amount and maintain stable account balances.
 /// Fee-on-transfer and rebasing tokens are unsupported.
 contract RevenueRouter is OwnableUpgradeable, IRevenueDistributor {
@@ -95,5 +96,18 @@ contract RevenueRouter is OwnableUpgradeable, IRevenueDistributor {
         if (newManager == address(0)) revert ZeroAddress();
         lender.setManager(newManager);
         emit ManagerUpdated(newManager);
+    }
+
+    /// @notice Sets the Lender's local reserve fee, including after immutability.
+    /// @dev The Lender accrues interest before applying the fee, enforces its 1,000 bps cap, and emits the update.
+    function setLocalReserveFeeBps(uint256 newFeeBps) external onlyOwner {
+        lender.setLocalReserveFeeBps(newFeeBps);
+    }
+
+    /// @notice Permanently freezes the Lender's deadline-gated parameters at the execution timestamp.
+    /// @dev The Lender requires execution before its current deadline and emits the update. This freezes
+    /// half-life, target debt ratio, and borrowing rounding-limit changes; local reserve fees remain adjustable.
+    function enableImmutabilityNow() external onlyOwner {
+        lender.enableImmutabilityNow();
     }
 }

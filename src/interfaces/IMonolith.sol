@@ -35,5 +35,7 @@ interface IMonolithLender {
     function setPendingOperator(address pendingOperator) external;
     function acceptOperator() external;
     function setManager(address manager) external;
+    function setLocalReserveFeeBps(uint256 newFeeBps) external;
+    function enableImmutabilityNow() external;
     function pullLocalReserves() external;
 }

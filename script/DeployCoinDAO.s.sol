@@ -225,6 +225,8 @@ contract DeployCoinDAOScript is Script {
         require(implementationSet.stakingRewards.code.length != 0, "Rewards implementation has no code");
         require(implementationSet.stakingRewardsFunder.code.length != 0, "Rewards funder implementation has no code");
         require(implementationSet.vestingWallet.code.length != 0, "Vesting implementation has no code");
+        require(implementationSet.governor.code.length != 0, "Governor implementation has no code");
+        require(implementationSet.timelock.code.length != 0, "Timelock implementation has no code");
     }
 
     function _verifyDeployment(

@@ -3,19 +3,17 @@ pragma solidity ^0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
-import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 
 import {CoinDAOVestingWallet} from "./CoinDAOVestingWallet.sol";
 import {CoinDAOGovernor} from "./CoinDAOGovernor.sol";
+import {CoinDAOTimelock} from "./CoinDAOTimelock.sol";
 import {GOV_TOKEN_SUPPLY as FIXED_GOV_TOKEN_SUPPLY, GovToken} from "./GovToken.sol";
 import {RevenueRouter} from "./RevenueRouter.sol";
 import {StakedGovToken} from "./StakedGovToken.sol";
 import {StakingRewards} from "./StakingRewards.sol";
 import {StakingRewardsFunder} from "./StakingRewardsFunder.sol";
-import {CoreDeploymentLib, GovernorDeploymentLib} from "./deployment/DeploymentLibraries.sol";
 import {IMonolithFactory, IMonolithLender} from "./interfaces/IMonolith.sol";
 
 contract CoinDAOFactory {
@@ -55,6 +53,8 @@ contract CoinDAOFactory {
     address public immutable stakingRewardsImplementation;
     address public immutable stakingRewardsFunderImplementation;
     address public immutable vestingWalletImplementation;
+    address public immutable governorImplementation;
+    address public immutable timelockImplementation;
     address public monolithBeneficiary;
     address public pendingMonolithBeneficiary;
 
@@ -78,6 +78,8 @@ contract CoinDAOFactory {
         address stakingRewards;
         address stakingRewardsFunder;
         address vestingWallet;
+        address governor;
+        address timelock;
     }
 
     struct PredictedAddresses {
@@ -172,6 +174,8 @@ contract CoinDAOFactory {
         stakingRewardsImplementation = implementations_.stakingRewards;
         stakingRewardsFunderImplementation = implementations_.stakingRewardsFunder;
         vestingWalletImplementation = implementations_.vestingWallet;
+        governorImplementation = implementations_.governor;
+        timelockImplementation = implementations_.timelock;
         monolithBeneficiary = monolithBeneficiary_;
     }
 
@@ -182,7 +186,9 @@ contract CoinDAOFactory {
             revenueRouter: revenueRouterImplementation,
             stakingRewards: stakingRewardsImplementation,
             stakingRewardsFunder: stakingRewardsFunderImplementation,
-            vestingWallet: vestingWalletImplementation
+            vestingWallet: vestingWalletImplementation,
+            governor: governorImplementation,
+            timelock: timelockImplementation
         });
     }
 
@@ -205,13 +211,9 @@ contract CoinDAOFactory {
             govTokenImplementation, _componentSalt(key, _GOV_TOKEN_COMPONENT), address(this)
         );
 
-        address[] memory proposers = new address[](0);
-        address[] memory executors = new address[](1);
-        executors[0] = address(0);
-        bytes32 timelockHash =
-            CoreDeploymentLib.timelockInitCodeHash(DEFAULT_TIMELOCK_DELAY, proposers, executors, address(this));
-        predicted.timelock =
-            Create2.computeAddress(_componentSalt(key, _TIMELOCK_COMPONENT), timelockHash, address(this));
+        predicted.timelock = Clones.predictDeterministicAddress(
+            timelockImplementation, _componentSalt(key, _TIMELOCK_COMPONENT), address(this)
+        );
 
         predicted.staker = Clones.predictDeterministicAddress(
             stakedGovTokenImplementation, _componentSalt(key, _STAKER_COMPONENT), address(this)
@@ -220,16 +222,9 @@ contract CoinDAOFactory {
             revenueRouterImplementation, _componentSalt(key, _REVENUE_ROUTER_COMPONENT), address(this)
         );
 
-        string memory governorName = string.concat(govParams.govTokenName, " Governor");
-        bytes32 governorHash = GovernorDeploymentLib.governorInitCodeHash(
-            governorName,
-            IVotes(predicted.staker),
-            TimelockController(payable(predicted.timelock)),
-            GOVERNOR_PROPOSAL_THRESHOLD,
-            GOVERNOR_QUORUM_NUMERATOR
+        predicted.governor = Clones.predictDeterministicAddress(
+            governorImplementation, _componentSalt(key, _GOVERNOR_COMPONENT), address(this)
         );
-        predicted.governor =
-            Create2.computeAddress(_componentSalt(key, _GOVERNOR_COMPONENT), governorHash, address(this));
 
         predicted.coinStakingRewards = Clones.predictDeterministicAddress(
             stakingRewardsImplementation, _componentSalt(key, _STAKING_REWARDS_COMPONENT), address(this)
@@ -370,20 +365,16 @@ contract CoinDAOFactory {
         govToken.initialize(govParams.govTokenName, govParams.govTokenSymbol, address(this));
         deployment.govToken = address(govToken);
 
-        TimelockController timelock;
+        CoinDAOTimelock timelock = CoinDAOTimelock(
+            payable(Clones.cloneDeterministic(
+                    timelockImplementation, _componentSalt(deploymentKey_, _TIMELOCK_COMPONENT)
+                ))
+        );
         {
             address[] memory proposers = new address[](0);
             address[] memory executors = new address[](1);
             executors[0] = address(0);
-            timelock = TimelockController(
-                payable(CoreDeploymentLib.deployTimelock(
-                        _componentSalt(deploymentKey_, _TIMELOCK_COMPONENT),
-                        DEFAULT_TIMELOCK_DELAY,
-                        proposers,
-                        executors,
-                        address(this)
-                    ))
-            );
+            timelock.initialize(DEFAULT_TIMELOCK_DELAY, proposers, executors, address(this));
         }
         deployment.timelock = address(timelock);
 
@@ -416,14 +407,12 @@ contract CoinDAOFactory {
 
         string memory governorName = string.concat(govParams.govTokenName, " Governor");
         CoinDAOGovernor governor = CoinDAOGovernor(
-            payable(GovernorDeploymentLib.deployGovernor(
-                    _componentSalt(deploymentKey_, _GOVERNOR_COMPONENT),
-                    governorName,
-                    IVotes(address(staker)),
-                    timelock,
-                    GOVERNOR_PROPOSAL_THRESHOLD,
-                    GOVERNOR_QUORUM_NUMERATOR
+            payable(Clones.cloneDeterministic(
+                    governorImplementation, _componentSalt(deploymentKey_, _GOVERNOR_COMPONENT)
                 ))
+        );
+        governor.initialize(
+            governorName, IVotes(address(staker)), timelock, GOVERNOR_PROPOSAL_THRESHOLD, GOVERNOR_QUORUM_NUMERATOR
         );
         deployment.governor = address(governor);
 
@@ -538,13 +527,15 @@ contract CoinDAOFactory {
     }
 
     function _validateImplementations(Implementations memory implementationSet) internal view {
-        address[6] memory values = [
+        address[8] memory values = [
             implementationSet.govToken,
             implementationSet.stakedGovToken,
             implementationSet.revenueRouter,
             implementationSet.stakingRewards,
             implementationSet.stakingRewardsFunder,
-            implementationSet.vestingWallet
+            implementationSet.vestingWallet,
+            implementationSet.governor,
+            implementationSet.timelock
         ];
         for (uint256 i; i < values.length; ++i) {
             address implementation = values[i];

@@ -2,6 +2,8 @@ pragma solidity ^0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
+import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {
     GovernorVotesQuorumFraction
 } from "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol";
@@ -9,6 +11,9 @@ import {
 import {CoinDAOFactory} from "../src/CoinDAOFactory.sol";
 import {CoinDAOGovernor} from "../src/CoinDAOGovernor.sol";
 import {StakedGovToken} from "../src/StakedGovToken.sol";
+import {RevenueRouter} from "../src/RevenueRouter.sol";
+import {IMonolithFactory} from "../src/interfaces/IMonolith.sol";
+import {MockMonolithLender} from "./mocks/MockMonolith.sol";
 import {CoinDAOTestBase} from "./helpers/CoinDAOTestBase.sol";
 
 contract CoinDAOGovernorTest is CoinDAOTestBase {
@@ -131,6 +136,100 @@ contract CoinDAOGovernorTest is CoinDAOTestBase {
         assertEq(uint256(governor.state(defeatedProposalId)), uint256(IGovernor.ProposalState.Defeated));
     }
 
+    function testGovernanceControlsLocalReserveFeeAndEarlyImmutability() public {
+        CoinDAOFactory.Deployment memory deployment = _deployWithImmutabilityPeriod(30 days);
+        CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
+        MockMonolithLender lender = MockMonolithLender(deployment.lender);
+        uint256 originalDeadline = lender.immutabilityDeadline();
+        assertEq(originalDeadline, block.timestamp + 30 days);
+        assertEq(RevenueRouter(deployment.revenueRouter).owner(), deployment.timelock);
+        assertEq(lender.operator(), deployment.revenueRouter);
+
+        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) =
+            _lenderControlActions(deployment.revenueRouter);
+        bytes32 descriptionHash = _passAndQueueProposal(
+            deployment, targets, values, calldatas, "Set reserve fee and freeze market parameters"
+        );
+        uint256 proposalId = governor.hashProposal(targets, values, calldatas, descriptionHash);
+        uint256 eta = governor.proposalEta(proposalId);
+
+        vm.warp(eta - 1);
+        vm.expectPartialRevert(TimelockController.TimelockUnexpectedOperationState.selector);
+        governor.execute(targets, values, calldatas, descriptionHash);
+        assertEq(lender.feeBps(), 0);
+        assertEq(lender.immutabilityDeadline(), originalDeadline);
+
+        vm.warp(eta);
+        governor.execute(targets, values, calldatas, descriptionHash);
+        assertEq(lender.feeBps(), 500);
+        assertEq(lender.immutabilityDeadline(), eta);
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Executed));
+    }
+
+    function testGovernanceImmutabilityExpiryRevertsEntireBatch() public {
+        CoinDAOFactory.Deployment memory deployment = _deployWithImmutabilityPeriod(factory.DEFAULT_TIMELOCK_DELAY());
+        CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
+        MockMonolithLender lender = MockMonolithLender(deployment.lender);
+        uint256 originalDeadline = lender.immutabilityDeadline();
+
+        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) =
+            _lenderControlActions(deployment.revenueRouter);
+        bytes32 descriptionHash =
+            _passAndQueueProposal(deployment, targets, values, calldatas, "Immutability expires while queued");
+        uint256 proposalId = governor.hashProposal(targets, values, calldatas, descriptionHash);
+        vm.warp(governor.proposalEta(proposalId));
+        assertGe(block.timestamp, originalDeadline);
+
+        vm.expectRevert(bytes("Deadline passed"));
+        governor.execute(targets, values, calldatas, descriptionHash);
+        assertEq(lender.feeBps(), 0, "Earlier fee update must roll back with the failed immutability action");
+        assertEq(lender.immutabilityDeadline(), originalDeadline);
+        assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Queued));
+    }
+
+    function testDeployedRouterRejectsDirectLenderControlCalls() public {
+        CoinDAOFactory.Deployment memory deployment = _deployWithImmutabilityPeriod(30 days);
+        RevenueRouter router = RevenueRouter(deployment.revenueRouter);
+        MockMonolithLender lender = MockMonolithLender(deployment.lender);
+        uint256 originalDeadline = lender.immutabilityDeadline();
+        address[4] memory callers = [address(this), manager, deployment.governor, address(0xBAD)];
+
+        for (uint256 i; i < callers.length; ++i) {
+            vm.startPrank(callers[i]);
+            vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, callers[i]));
+            router.setLocalReserveFeeBps(500);
+            vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, callers[i]));
+            router.enableImmutabilityNow();
+            vm.stopPrank();
+        }
+
+        assertEq(lender.feeBps(), 0);
+        assertEq(lender.immutabilityDeadline(), originalDeadline);
+    }
+
+    function _deployWithImmutabilityPeriod(uint256 timeUntilImmutability)
+        internal
+        returns (CoinDAOFactory.Deployment memory)
+    {
+        IMonolithFactory.DeployParams memory params = _monolithParams();
+        params.timeUntilImmutability = timeUntilImmutability;
+        return factory.deploy(_nextSalt(), _govParams(0, CoinDAOFactory.StakingTokenChoice.Coin), params, manager);
+    }
+
+    function _lenderControlActions(address router)
+        internal
+        pure
+        returns (address[] memory targets, uint256[] memory values, bytes[] memory calldatas)
+    {
+        targets = new address[](2);
+        targets[0] = router;
+        targets[1] = router;
+        values = new uint256[](2);
+        calldatas = new bytes[](2);
+        calldatas[0] = abi.encodeCall(RevenueRouter.setLocalReserveFeeBps, (500));
+        calldatas[1] = abi.encodeCall(RevenueRouter.enableImmutabilityNow, ());
+    }
+
     function _passAndQueueQuorumProposal(
         CoinDAOFactory.Deployment memory deployment,
         uint256 newQuorumNumerator,
@@ -139,17 +238,27 @@ contract CoinDAOGovernorTest is CoinDAOTestBase {
         internal
         returns (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, bytes32 descriptionHash)
     {
+        targets = new address[](1);
+        targets[0] = deployment.governor;
+        values = new uint256[](1);
+        calldatas = new bytes[](1);
+        calldatas[0] = abi.encodeCall(GovernorVotesQuorumFraction.updateQuorumNumerator, (newQuorumNumerator));
+        descriptionHash = _passAndQueueProposal(deployment, targets, values, calldatas, description);
+    }
+
+    function _passAndQueueProposal(
+        CoinDAOFactory.Deployment memory deployment,
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        string memory description
+    ) internal returns (bytes32 descriptionHash) {
         CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
         address voter = address(0xC0FFEE);
         uint256 votingPower = governor.proposalThreshold();
         _stakeGov(deployment, voter, votingPower);
         vm.roll(governor.clock() + 1);
 
-        targets = new address[](1);
-        targets[0] = address(governor);
-        values = new uint256[](1);
-        calldatas = new bytes[](1);
-        calldatas[0] = abi.encodeCall(governor.updateQuorumNumerator, (newQuorumNumerator));
         descriptionHash = keccak256(bytes(description));
         vm.prank(voter);
         uint256 proposalId = governor.propose(targets, values, calldatas, description);

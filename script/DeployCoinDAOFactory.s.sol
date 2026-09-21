@@ -4,6 +4,8 @@ pragma solidity ^0.8.26;
 import {Script, console} from "forge-std/Script.sol";
 
 import {CoinDAOFactory} from "../src/CoinDAOFactory.sol";
+import {CoinDAOGovernor} from "../src/CoinDAOGovernor.sol";
+import {CoinDAOTimelock} from "../src/CoinDAOTimelock.sol";
 import {CoinDAOVestingWallet} from "../src/CoinDAOVestingWallet.sol";
 import {GovToken} from "../src/GovToken.sol";
 import {RevenueRouter} from "../src/RevenueRouter.sol";
@@ -37,7 +39,9 @@ contract DeployCoinDAOFactoryScript is Script {
             revenueRouter: address(new RevenueRouter()),
             stakingRewards: address(new StakingRewards()),
             stakingRewardsFunder: address(new StakingRewardsFunder()),
-            vestingWallet: address(new CoinDAOVestingWallet())
+            vestingWallet: address(new CoinDAOVestingWallet()),
+            governor: address(new CoinDAOGovernor()),
+            timelock: address(new CoinDAOTimelock())
         });
         factory = new CoinDAOFactory(IMonolithFactory(MONOLITH_FACTORY), beneficiary, implementationSet);
         vm.stopBroadcast();
@@ -63,6 +67,8 @@ contract DeployCoinDAOFactoryScript is Script {
         require(
             factory.vestingWalletImplementation() == implementationSet.vestingWallet, "Incorrect vesting implementation"
         );
+        require(factory.governorImplementation() == implementationSet.governor, "Incorrect Governor implementation");
+        require(factory.timelockImplementation() == implementationSet.timelock, "Incorrect Timelock implementation");
 
         console.log("GOV implementation:", implementationSet.govToken);
         console.log("Staked GOV implementation:", implementationSet.stakedGovToken);
@@ -70,6 +76,8 @@ contract DeployCoinDAOFactoryScript is Script {
         console.log("Staking rewards implementation:", implementationSet.stakingRewards);
         console.log("Rewards funder implementation:", implementationSet.stakingRewardsFunder);
         console.log("Vesting wallet implementation:", implementationSet.vestingWallet);
+        console.log("Governor implementation:", implementationSet.governor);
+        console.log("Timelock implementation:", implementationSet.timelock);
         console.log("CoinDAO factory:", address(factory));
     }
 }

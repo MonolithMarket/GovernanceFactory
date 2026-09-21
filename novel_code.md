@@ -18,10 +18,12 @@ against by how much of it is original project logic versus reused library code. 
 | File | Tag | Provenance | Primary review focus |
 | :-- | :-- | :-- | :-- |
 | `lib/openzeppelin-contracts` | Imported library | OpenZeppelin Contracts v5.6.1 | Version pin and integration assumptions |
+| `lib/openzeppelin-contracts-upgradeable` | Imported library | OpenZeppelin Contracts v5.6.1 initializer variants | Initialization and clone storage |
 | `src/StakedGovToken.sol` | Novel + standard composition | OZ ERC20Wrapper/ERC20Votes plus direct reward-per-token accounting | Distribution snapshots, rounding, non-transferability |
 | `src/StakingRewards.sol` | Adapted | Synthetix `StakingRewards` | Solidity 0.8 port and intentionally removed hooks |
 | `src/GovToken.sol` | Standard composition | OZ ERC20 + ERC20Permit | Fixed supply and initial holder |
-| `src/CoinDAOGovernor.sol` | Standard composition | OZ Governor extensions | Fractional quorum and threshold parameters |
+| `src/CoinDAOGovernor.sol` | Standard composition | OZ initializer-based Governor extensions | Initializer order, fractional quorum, and threshold parameters |
+| `src/CoinDAOTimelock.sol` | Standard composition | OZ TimelockControllerUpgradeable | Implementation lock and clone initialization |
 | `src/RevenueRouter.sol` | Novel | Written for Monolith | Revenue split and Lender operator authority |
 | `src/StakingRewardsFunder.sol` | Novel | Written for Monolith | Tranche schedule and final balance sweep |
 | `src/CoinDAOFactory.sol` | Novel | Written for Monolith | Allocation math, deployment ordering, privilege handoff |
@@ -74,8 +76,13 @@ wired exclusively to `StakedGovToken`.
 
 ### `src/CoinDAOGovernor.sol`
 
-The governor composes OZ Governor, GovernorSettings, GovernorCountingSimple,
-GovernorVotesQuorumFraction, and GovernorTimelockControl. The project-specific behavior is parameterization:
+The governor composes the initializer-based OZ Governor, GovernorSettings,
+GovernorCountingSimple, GovernorVotesQuorumFraction, and GovernorTimelockControl
+modules. The implementation constructor disables initialization; the factory
+initializes each deterministic minimal proxy in its creation transaction. Voting
+token initialization precedes quorum initialization so the initial checkpoint
+uses the correct clock. Each clone stores its own voting token and EIP-712 domain.
+The project-specific governance behavior is parameterization:
 
 - Voting delay: 7,200 blocks.
 - Voting period: 36,000 blocks.

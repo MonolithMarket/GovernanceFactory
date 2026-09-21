@@ -10,7 +10,12 @@ contract MockMonolithLender {
     address public immutable coin;
     address public immutable vault;
     uint256 public accruedLocalReserves;
+    uint16 public feeBps;
+    uint256 public immutabilityDeadline;
     bool public failOperatorNomination;
+
+    event LocalReserveFeeUpdated(uint256 feeBps);
+    event ImmutabilityEnabled(uint256 timestamp);
 
     error Unauthorized();
     error ZeroAddress();
@@ -21,6 +26,7 @@ contract MockMonolithLender {
         manager = manager_;
         coin = coin_;
         vault = vault_;
+        immutabilityDeadline = block.timestamp;
     }
 
     function setPendingOperator(address pendingOperator_) external {
@@ -43,6 +49,26 @@ contract MockMonolithLender {
 
     function setAccruedLocalReserves(uint256 amount) external {
         accruedLocalReserves = amount;
+    }
+
+    // Test setup only. The production Lender initializes this from its deployment parameters.
+    function setImmutabilityDeadline(uint256 deadline) external {
+        immutabilityDeadline = deadline;
+    }
+
+    // Models authorization, validation, and state changes; interest accrual is not simulated by this mock.
+    function setLocalReserveFeeBps(uint256 newFeeBps) external {
+        if (msg.sender != operator) revert Unauthorized();
+        require(newFeeBps <= 1_000, "Invalid fee");
+        feeBps = uint16(newFeeBps);
+        emit LocalReserveFeeUpdated(newFeeBps);
+    }
+
+    function enableImmutabilityNow() external {
+        if (msg.sender != operator) revert Unauthorized();
+        require(block.timestamp < immutabilityDeadline, "Deadline passed");
+        immutabilityDeadline = block.timestamp;
+        emit ImmutabilityEnabled(block.timestamp);
     }
 
     function setFailOperatorNomination(bool fail) external {
@@ -69,6 +95,7 @@ contract MockMonolithFactory is IMonolithFactory {
         MockERC20 vaultToken = new MockERC20(string.concat("Staked ", params.name), string.concat("s", params.symbol));
         MockMonolithLender mockLender =
             new MockMonolithLender(params.operator, params.manager, address(coinToken), address(vaultToken));
+        mockLender.setImmutabilityDeadline(block.timestamp + params.timeUntilImmutability);
 
         lender = address(mockLender);
         coin = address(coinToken);

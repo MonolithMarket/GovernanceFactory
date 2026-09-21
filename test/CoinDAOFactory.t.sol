@@ -173,6 +173,7 @@ contract CoinDAOFactoryTest is CoinDAOTestBase {
         assertEq(govToken.balanceOf(deployment.treasuryVesting), allocation.treasuryVested);
         assertEq(govToken.balanceOf(deployment.monolithVesting), allocation.monolithVesting);
         assertEq(govToken.balanceOf(deployment.deployerVesting), allocation.deployerVesting);
+        assertEq(govToken.balanceOf(address(factory)), 0);
 
         CoinDAOGovernor governor = CoinDAOGovernor(payable(deployment.governor));
         assertEq(address(governor.token()), deployment.staker);
@@ -390,6 +391,7 @@ contract CoinDAOFactoryTest is CoinDAOTestBase {
         assertEq(govToken.balanceOf(deployment.treasuryVesting), allocation.treasuryVested);
         assertEq(govToken.balanceOf(deployment.monolithVesting), allocation.monolithVesting);
         assertEq(govToken.balanceOf(deployment.deployerVesting), allocation.deployerVesting);
+        assertEq(govToken.balanceOf(address(factory)), 0);
     }
 
     function testExistingMarketLaunchSupportsSCoin() public {
@@ -485,12 +487,15 @@ contract CoinDAOFactoryTest is CoinDAOTestBase {
         uint256 supply = factory.GOV_TOKEN_SUPPLY();
         uint256 monolithAmount = (supply * 200) / 10_000;
         uint256 deployerAmount = (supply * deployerStakeBps) / 10_000;
-        uint256 remaining = supply - monolithAmount - deployerAmount;
+        uint256 immediateAmount = (supply * 500) / 10_000;
+        uint256 remaining = supply - monolithAmount - deployerAmount - immediateAmount;
         CoinDAOFactory.AllocationAmounts memory allocation = factory.allocationFor(deployerStakeBps);
+        assertEq(factory.ALLOCATION_WEIGHT_TOTAL(), 9_300);
         assertEq(allocation.monolithVesting, monolithAmount);
         assertEq(allocation.deployerVesting, deployerAmount);
-        assertEq(allocation.coinStakingRewards, (remaining * 6_500) / 9_800);
-        assertEq(allocation.immediateAllocation, (remaining * 500) / 9_800);
+        assertEq(allocation.immediateAllocation, immediateAmount);
+        assertEq(allocation.coinStakingRewards, (remaining * 6_500) / 9_300);
+        assertEq(allocation.treasuryVested, remaining - allocation.coinStakingRewards);
         assertEq(_sum(allocation), supply);
     }
 }

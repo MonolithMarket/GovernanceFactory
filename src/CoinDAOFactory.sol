@@ -22,7 +22,7 @@ contract CoinDAOFactory {
     uint16 public constant BPS = 10_000;
     uint16 public constant MAX_DEPLOYER_STAKE_BPS = 2_000;
     uint16 public constant MONOLITH_BPS = 200;
-    uint16 public constant ALLOCATION_WEIGHT_TOTAL = 9_800;
+    uint16 public constant ALLOCATION_WEIGHT_TOTAL = 9_300;
     uint16 public constant COIN_STAKING_REWARDS_WEIGHT = 6_500;
     uint16 public constant IMMEDIATE_ALLOCATION_WEIGHT = 500;
     uint16 public constant VESTED_TREASURY_WEIGHT = 2_800;
@@ -276,15 +276,16 @@ contract CoinDAOFactory {
         allocation.monolithVesting = (totalSupply * MONOLITH_BPS) / uint256(BPS);
         // Deployer vesting receives up to 20% of supply over 4 years.
         allocation.deployerVesting = (totalSupply * deployerStakeBps) / uint256(BPS);
-        // The remainder is split using a 65:5:28 staking/immediate/vested-treasury ratio.
-        // Increasing the deployer stake proportionally reduces all three of those allocations.
-        uint256 remainingAllocation = totalSupply - allocation.monolithVesting - allocation.deployerVesting;
+        // The liquid deployer allocation is always 5% of the fixed supply.
+        allocation.immediateAllocation = (totalSupply * IMMEDIATE_ALLOCATION_WEIGHT) / uint256(BPS);
+        // Increasing the deployer stake proportionally reduces the remaining 65:28
+        // staking-rewards/vested-treasury allocation.
+        uint256 remainingAllocation =
+            totalSupply - allocation.monolithVesting - allocation.deployerVesting - allocation.immediateAllocation;
         allocation.coinStakingRewards =
             (remainingAllocation * COIN_STAKING_REWARDS_WEIGHT) / uint256(ALLOCATION_WEIGHT_TOTAL);
-        allocation.immediateAllocation =
-            (remainingAllocation * IMMEDIATE_ALLOCATION_WEIGHT) / uint256(ALLOCATION_WEIGHT_TOTAL);
         // Assign all division dust to the vested treasury so the fixed supply is fully allocated.
-        allocation.treasuryVested = remainingAllocation - allocation.coinStakingRewards - allocation.immediateAllocation;
+        allocation.treasuryVested = remainingAllocation - allocation.coinStakingRewards;
     }
 
     function deploy(

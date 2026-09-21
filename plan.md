@@ -26,19 +26,19 @@ The product should not be a generic ERC20 deployer. It should be a standardized,
 
 Every factory-launched GovToken should use the same supply distribution formula. This removes launch-template complexity while allowing a bounded, disclosed deployer allocation.
 
-Let `D` be the deployer stake in percentage points of total GovToken supply, where `0 <= D <= 20` and `D = 20` means 20%. Monolith always receives a fixed 2%. The remaining non-Monolith, non-deployer-vesting supply is split in a 65:5:28 ratio between CoinStakingRewards, an immediate liquid allocation, and vested DAO treasury:
+Let `D` be the deployer stake in percentage points of total GovToken supply, where `0 <= D <= 20` and `D = 20` means 20%. Monolith always receives a fixed 2%, and the immediate liquid allocation is always 5%. The remaining supply is split in a 65:28 ratio between CoinStakingRewards and the vested DAO treasury:
 
-`scale = (98 - D) / 98`
+`scale = (93 - D) / 93`
 
 | Bucket | Allocation | Treatment / purpose |
 | :---- | :---- | :---- |
 | CoinStakingRewards reserve | `65% * scale` | Funds the default staking rewards program over 4 years. |
-| Immediate allocation | `5% * scale` | Issued liquid to `deployerRecipient`; sent to the DAO treasury when no recipient is specified. |
+| Immediate allocation | 5% | Issued liquid to `deployerRecipient`; sent to the DAO treasury when no recipient is specified. |
 | DAO treasury vesting | `28% * scale` | Vests linearly over 4 years. |
 | Monolith allocation | 2% | Fixed allocation for Monolith; recommended simple linear vesting. |
 | Deployer vesting | `D%`, max 20% | Optional launch allocation set by deployer and vested linearly over 4 years. |
 
-At `D = 0`, the distribution is 65% CoinStakingRewards, 5% immediate allocation, 28% vested DAO treasury, and 2% Monolith. At the maximum `D = 20`, CoinStakingRewards becomes 51.7347%, the immediate allocation becomes 3.9796%, vested DAO treasury becomes 22.2857%, Monolith remains 2%, and deployer vesting receives 20%.
+At `D = 0`, the distribution is 65% CoinStakingRewards, 5% immediate allocation, 28% vested DAO treasury, and 2% Monolith. At the maximum `D = 20`, CoinStakingRewards becomes 51.0215%, the immediate allocation remains 5%, vested DAO treasury becomes 21.9785%, Monolith remains 2%, and deployer vesting receives 20%.
 
 The optional `D%` deployer stake is not liquid at genesis; it always vests over 4 years. Independently, a nonzero `deployerRecipient` opts into the liquid immediate allocation even when `D = 0`. When `deployerRecipient` is zero, `D` must also be zero and the immediate allocation remains in the DAO treasury.
 
@@ -154,12 +154,12 @@ Recommended cadence can remain simple: 1-day voting delay, 5-day voting period, 
 
 # **10\. Deployment flow**
 
-1. Read deployer stake `D`, enforce `0 <= D <= 20`, and compute `scale = (98 - D) / 98`.  
+1. Read deployer stake `D`, enforce `0 <= D <= 20`, and compute `scale = (93 - D) / 93`.
 2. Deploy GovToken with fixed supply.  
 3. Deploy CoinStakingRewards and fund it with `65% * scale` of supply.  
 4. Deploy GovStaking / stGOV.  
 5. Deploy Governor \+ Timelock using stGOV as the voting token.  
-6. Send the liquid `5% * scale` allocation to `deployerRecipient`, or to the Timelock treasury when the recipient is zero; fund `28% * scale` to TreasuryVesting.
+6. Send the fixed liquid 5% allocation to `deployerRecipient`, or to the Timelock treasury when the recipient is zero; fund `28% * scale` to TreasuryVesting.
 7. Fund Monolith allocation contract with 2%.  
 8. If `D > 0`, deploy DeployerVesting and fund it with `D%` of supply for the deployer-designated recipient.  
 9. Deploy RevenueRouter and set it as Lender operator.  

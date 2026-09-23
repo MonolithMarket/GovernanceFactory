@@ -10,17 +10,23 @@ contract MockMonolithLender {
     address public immutable coin;
     address public immutable vault;
     uint256 public accruedLocalReserves;
+    uint256 public feeBps;
+    uint256 public immutabilityDeadline;
     bool public failOperatorNomination;
 
     error Unauthorized();
     error ZeroAddress();
     error ForcedFailure();
 
-    constructor(address operator_, address manager_, address coin_, address vault_) {
+    event LocalReserveFeeUpdated(uint256 feeBps);
+    event ImmutabilityEnabled(uint256 timestamp);
+
+    constructor(address operator_, address manager_, address coin_, address vault_, uint256 timeUntilImmutability_) {
         operator = operator_;
         manager = manager_;
         coin = coin_;
         vault = vault_;
+        immutabilityDeadline = block.timestamp + timeUntilImmutability_;
     }
 
     function setPendingOperator(address pendingOperator_) external {
@@ -39,6 +45,20 @@ contract MockMonolithLender {
         if (msg.sender != operator && msg.sender != manager) revert Unauthorized();
         if (manager_ == address(0)) revert ZeroAddress();
         manager = manager_;
+    }
+
+    function setLocalReserveFeeBps(uint256 feeBps_) external {
+        if (msg.sender != operator) revert Unauthorized();
+        require(feeBps_ <= 1_000, "Invalid fee");
+        feeBps = feeBps_;
+        emit LocalReserveFeeUpdated(feeBps_);
+    }
+
+    function enableImmutabilityNow() external {
+        if (msg.sender != operator) revert Unauthorized();
+        require(block.timestamp < immutabilityDeadline, "Deadline passed");
+        immutabilityDeadline = block.timestamp;
+        emit ImmutabilityEnabled(block.timestamp);
     }
 
     function setAccruedLocalReserves(uint256 amount) external {
@@ -67,8 +87,9 @@ contract MockMonolithFactory is IMonolithFactory {
         lastParams = params;
         MockERC20 coinToken = new MockERC20(params.name, params.symbol);
         MockERC20 vaultToken = new MockERC20(string.concat("Staked ", params.name), string.concat("s", params.symbol));
-        MockMonolithLender mockLender =
-            new MockMonolithLender(params.operator, params.manager, address(coinToken), address(vaultToken));
+        MockMonolithLender mockLender = new MockMonolithLender(
+            params.operator, params.manager, address(coinToken), address(vaultToken), params.timeUntilImmutability
+        );
 
         lender = address(mockLender);
         coin = address(coinToken);

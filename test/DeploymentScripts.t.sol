@@ -6,6 +6,8 @@ import {Test} from "forge-std/Test.sol";
 import {DeployCoinDAOScript} from "../script/DeployCoinDAO.s.sol";
 import {DeployCoinDAOFactoryScript} from "../script/DeployCoinDAOFactory.s.sol";
 import {CoinDAOFactory} from "../src/CoinDAOFactory.sol";
+import {CoinDAOGovernor} from "../src/CoinDAOGovernor.sol";
+import {CoinDAOTimelock} from "../src/CoinDAOTimelock.sol";
 import {CoinDAOVestingWallet} from "../src/CoinDAOVestingWallet.sol";
 import {GovToken} from "../src/GovToken.sol";
 import {RevenueRouter} from "../src/RevenueRouter.sol";
@@ -17,6 +19,10 @@ import {IMonolithFactory} from "../src/interfaces/IMonolith.sol";
 contract DeployCoinDAOScriptHarness is DeployCoinDAOScript {
     function preflight(CoinDAOFactory factory) external view {
         _preflight(factory);
+    }
+
+    function preflightImplementations(CoinDAOFactory.Implementations memory implementationSet) external view {
+        _preflightImplementations(implementationSet);
     }
 }
 
@@ -77,7 +83,7 @@ contract DeploymentScriptsTest is Test {
     function testDefaultSepoliaConfiguration() public {
         DeployCoinDAOFactoryScript factoryScript = new DeployCoinDAOFactoryScript();
         assertEq(script.SEPOLIA_CHAIN_ID(), 11_155_111);
-        assertEq(script.MONOLITH_FACTORY(), 0x365009FA2Ddb17f386E20854E4B281827619E4D2);
+        assertEq(script.MONOLITH_FACTORY(), 0x8dDCaeb76a70b860DEaD944970bae0e955c10DA2);
         assertEq(script.WETH(), 0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9);
         assertEq(script.ETH_USD_FEED(), 0x694AA1769357215DE4FAC081bf1f309aDC325306);
         assertEq(script.COIN_NAME(), "Monolith Sepolia USD");
@@ -141,6 +147,18 @@ contract DeploymentScriptsTest is Test {
         script.preflight(factory);
     }
 
+    function testPreflightRequiresGovernanceImplementationCode() public {
+        CoinDAOFactory.Implementations memory implementationSet = _newImplementations();
+        address governor = implementationSet.governor;
+        implementationSet.governor = address(0xBAD);
+        vm.expectRevert("Governor implementation has no code");
+        script.preflightImplementations(implementationSet);
+        implementationSet.governor = governor;
+        implementationSet.timelock = address(0xBAD);
+        vm.expectRevert("Timelock implementation has no code");
+        script.preflightImplementations(implementationSet);
+    }
+
     function _etchPreflightDependencies(address feedStub) internal {
         MonolithFactoryStub monolithFactoryStub = new MonolithFactoryStub();
         SepoliaWethStub wethStub = new SepoliaWethStub();
@@ -157,7 +175,9 @@ contract DeploymentScriptsTest is Test {
             revenueRouter: address(new RevenueRouter()),
             stakingRewards: address(new StakingRewards()),
             stakingRewardsFunder: address(new StakingRewardsFunder()),
-            vestingWallet: address(new CoinDAOVestingWallet())
+            vestingWallet: address(new CoinDAOVestingWallet()),
+            governor: address(new CoinDAOGovernor()),
+            timelock: address(new CoinDAOTimelock())
         });
     }
 }

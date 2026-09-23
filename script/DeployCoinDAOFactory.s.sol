@@ -16,7 +16,7 @@ import {IMonolithFactory} from "../src/interfaces/IMonolith.sol";
 
 contract DeployCoinDAOFactoryScript is Script {
     uint256 public constant SEPOLIA_CHAIN_ID = 11_155_111;
-    address public constant MONOLITH_FACTORY = 0x365009FA2Ddb17f386E20854E4B281827619E4D2;
+    address public constant MONOLITH_FACTORY = 0x8dDCaeb76a70b860DEaD944970bae0e955c10DA2;
 
     function run() external returns (CoinDAOFactory factory) {
         require(block.chainid == SEPOLIA_CHAIN_ID, "Sepolia only");

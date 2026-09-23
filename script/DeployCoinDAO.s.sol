@@ -21,7 +21,7 @@ contract DeployCoinDAOScript is Script {
     using SafeCast for uint256;
 
     uint256 public constant SEPOLIA_CHAIN_ID = 11_155_111;
-    address public constant MONOLITH_FACTORY = 0x365009FA2Ddb17f386E20854E4B281827619E4D2;
+    address public constant MONOLITH_FACTORY = 0x8dDCaeb76a70b860DEaD944970bae0e955c10DA2;
     address public constant WETH = 0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9;
     address public constant ETH_USD_FEED = 0x694AA1769357215DE4FAC081bf1f309aDC325306;
 

@@ -31,8 +31,7 @@ contract RevenueRouterTest is Test, CloneTestUtils {
         coin = new MockERC20("Coin", "COIN");
         staker = StakedGovToken(Clones.clone(address(new StakedGovToken())));
         router = RevenueRouter(Clones.clone(address(new RevenueRouter())));
-        lender = new MockMonolithLender(address(router), address(this), address(coin), address(0xCAFE));
-        lender.setImmutabilityDeadline(block.timestamp + 30 days);
+        lender = new MockMonolithLender(address(router), address(this), address(coin), address(0xCAFE), 30 days);
         staker.initialize(IERC20(address(gov)), IERC20(address(coin)), "Staked Governance", "sGOV", address(router));
         router.initialize(address(lender), address(coin), treasury, address(staker), 10_000, address(this));
         assertTrue(gov.transfer(alice, 100 ether));

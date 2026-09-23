@@ -4,6 +4,8 @@ import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {CoinDAOFactory} from "../../src/CoinDAOFactory.sol";
+import {CoinDAOGovernor} from "../../src/CoinDAOGovernor.sol";
+import {CoinDAOTimelock} from "../../src/CoinDAOTimelock.sol";
 import {CoinDAOVestingWallet} from "../../src/CoinDAOVestingWallet.sol";
 import {GovToken} from "../../src/GovToken.sol";
 import {RevenueRouter} from "../../src/RevenueRouter.sol";
@@ -63,7 +65,9 @@ abstract contract CoinDAOTestBase is Test {
             revenueRouter: address(new RevenueRouter()),
             stakingRewards: address(new StakingRewards()),
             stakingRewardsFunder: address(new StakingRewardsFunder()),
-            vestingWallet: address(new CoinDAOVestingWallet())
+            vestingWallet: address(new CoinDAOVestingWallet()),
+            governor: address(new CoinDAOGovernor()),
+            timelock: address(new CoinDAOTimelock())
         });
     }
 

@@ -83,9 +83,9 @@ contract RevenueRouterTest is Test, CloneTestUtils {
 
     function testSetLocalReserveFeeBpsAcceptsEndpointsAndEmitsFromLender() public {
         vm.expectEmit(false, false, false, true, address(lender));
-        emit LocalReserveFeeUpdated(1_000);
-        router.setLocalReserveFeeBps(1_000);
-        assertEq(lender.feeBps(), 1_000);
+        emit LocalReserveFeeUpdated(5_000);
+        router.setLocalReserveFeeBps(5_000);
+        assertEq(lender.feeBps(), 5_000);
 
         vm.expectEmit(false, false, false, true, address(lender));
         emit LocalReserveFeeUpdated(0);
@@ -94,13 +94,13 @@ contract RevenueRouterTest is Test, CloneTestUtils {
     }
 
     function testFuzzSetLocalReserveFeeBps(uint256 newFeeBps) public {
-        newFeeBps = bound(newFeeBps, 0, 1_000);
+        newFeeBps = bound(newFeeBps, 0, 5_000);
         router.setLocalReserveFeeBps(newFeeBps);
         assertEq(lender.feeBps(), newFeeBps);
     }
 
     function testFuzzInvalidLocalReserveFeePreservesExistingFee(uint256 newFeeBps) public {
-        newFeeBps = bound(newFeeBps, 1_001, type(uint256).max);
+        newFeeBps = bound(newFeeBps, 5_001, type(uint256).max);
         router.setLocalReserveFeeBps(500);
 
         vm.expectRevert(bytes("Invalid fee"));
@@ -165,8 +165,8 @@ contract RevenueRouterTest is Test, CloneTestUtils {
         uint256 deadline = lender.immutabilityDeadline();
         vm.warp(deadline + 1);
 
-        router.setLocalReserveFeeBps(1_000);
-        assertEq(lender.feeBps(), 1_000);
+        router.setLocalReserveFeeBps(5_000);
+        assertEq(lender.feeBps(), 5_000);
         router.setLocalReserveFeeBps(0);
         assertEq(lender.feeBps(), 0);
         assertEq(lender.immutabilityDeadline(), deadline);

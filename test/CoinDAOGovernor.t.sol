@@ -156,7 +156,7 @@ contract CoinDAOGovernorTest is CoinDAOTestBase {
         vm.warp(eta - 1);
         vm.expectPartialRevert(TimelockController.TimelockUnexpectedOperationState.selector);
         governor.execute(targets, values, calldatas, descriptionHash);
-        assertEq(lender.feeBps(), 0);
+        assertEq(lender.feeBps(), factory.DEFAULT_LOCAL_RESERVE_FEE_BPS());
         assertEq(lender.immutabilityDeadline(), originalDeadline);
 
         vm.warp(eta);
@@ -182,7 +182,11 @@ contract CoinDAOGovernorTest is CoinDAOTestBase {
 
         vm.expectRevert(bytes("Deadline passed"));
         governor.execute(targets, values, calldatas, descriptionHash);
-        assertEq(lender.feeBps(), 0, "Earlier fee update must roll back with the failed immutability action");
+        assertEq(
+            lender.feeBps(),
+            factory.DEFAULT_LOCAL_RESERVE_FEE_BPS(),
+            "Earlier fee update must roll back with the failed immutability action"
+        );
         assertEq(lender.immutabilityDeadline(), originalDeadline);
         assertEq(uint256(governor.state(proposalId)), uint256(IGovernor.ProposalState.Queued));
     }
@@ -203,7 +207,7 @@ contract CoinDAOGovernorTest is CoinDAOTestBase {
             vm.stopPrank();
         }
 
-        assertEq(lender.feeBps(), 0);
+        assertEq(lender.feeBps(), factory.DEFAULT_LOCAL_RESERVE_FEE_BPS());
         assertEq(lender.immutabilityDeadline(), originalDeadline);
     }
 

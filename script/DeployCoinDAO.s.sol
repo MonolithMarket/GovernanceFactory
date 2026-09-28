@@ -257,6 +257,7 @@ contract DeployCoinDAOScript is Script {
 
         IMonolithLender lender = IMonolithLender(deployment.lender);
         require(lender.operator() == deployment.revenueRouter, "Incorrect Lender operator");
+        require(lender.feeBps() == factory.DEFAULT_LOCAL_RESERVE_FEE_BPS(), "Incorrect local reserve fee");
         require(_managerOf(deployment.lender) == expectedManager, "Incorrect Lender manager");
 
         address expectedStakingToken =

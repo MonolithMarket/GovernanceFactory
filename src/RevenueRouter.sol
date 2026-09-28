@@ -99,7 +99,7 @@ contract RevenueRouter is OwnableUpgradeable, IRevenueDistributor {
     }
 
     /// @notice Sets the Lender's local reserve fee, including after immutability.
-    /// @dev The Lender accrues interest before applying the fee, enforces its 1,000 bps cap, and emits the update.
+    /// @dev The Lender accrues interest before applying the fee, enforces its 5,000 bps cap, and emits the update.
     function setLocalReserveFeeBps(uint256 newFeeBps) external onlyOwner {
         lender.setLocalReserveFeeBps(newFeeBps);
     }

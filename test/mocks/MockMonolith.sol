@@ -10,7 +10,7 @@ contract MockMonolithLender {
     address public immutable coin;
     address public immutable vault;
     uint256 public accruedLocalReserves;
-    uint256 public feeBps;
+    uint16 public feeBps;
     uint256 public immutabilityDeadline;
     bool public failOperatorNomination;
 
@@ -49,8 +49,8 @@ contract MockMonolithLender {
 
     function setLocalReserveFeeBps(uint256 feeBps_) external {
         if (msg.sender != operator) revert Unauthorized();
-        require(feeBps_ <= 1_000, "Invalid fee");
-        feeBps = feeBps_;
+        require(feeBps_ <= 5_000, "Invalid fee");
+        feeBps = uint16(feeBps_);
         emit LocalReserveFeeUpdated(feeBps_);
     }
 

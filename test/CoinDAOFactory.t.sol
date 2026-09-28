@@ -161,6 +161,8 @@ contract CoinDAOFactoryTest is CoinDAOTestBase {
         assertEq(deployment.stakingToken, deployment.coin);
         assertEq(MockMonolithLender(deployment.lender).operator(), deployment.revenueRouter);
         assertEq(MockMonolithLender(deployment.lender).manager(), manager);
+        assertEq(factory.DEFAULT_LOCAL_RESERVE_FEE_BPS(), 5_000);
+        assertEq(MockMonolithLender(deployment.lender).feeBps(), 5_000);
 
         CoinDAOFactory.AllocationAmounts memory allocation = factory.allocationFor(1_000);
         GovToken govToken = GovToken(deployment.govToken);
@@ -365,6 +367,8 @@ contract CoinDAOFactoryTest is CoinDAOTestBase {
         CoinDAOFactory.PredictedAddresses memory predicted =
             factory.predictCoinDAOAddresses(existingOperator, userSalt, params);
         vm.prank(existingOperator);
+        lender.setLocalReserveFeeBps(750);
+        vm.prank(existingOperator);
         lender.setPendingOperator(address(factory));
         vm.prank(existingOperator);
         CoinDAOFactory.Deployment memory deployment = factory.deployForExistingCoin(userSalt, params, lenderAddress);
@@ -380,6 +384,7 @@ contract CoinDAOFactoryTest is CoinDAOTestBase {
         assertEq(lender.operator(), deployment.revenueRouter);
         assertEq(lender.pendingOperator(), address(0));
         assertEq(lender.manager(), existingManager);
+        assertEq(lender.feeBps(), 750);
         assertEq(Ownable(deployment.revenueRouter).owner(), deployment.timelock);
         assertEq(address(StakedGovToken(deployment.staker).revenueRouter()), deployment.revenueRouter);
         assertTrue(factory.hasCoinDAO(lenderAddress));
@@ -397,6 +402,7 @@ contract CoinDAOFactoryTest is CoinDAOTestBase {
         assertEq(deployment.stakingToken, deployment.vault);
         assertEq(deployment.deployerVesting, address(0));
         assertEq(MockMonolithLender(deployment.lender).manager(), existingManager);
+        assertEq(MockMonolithLender(deployment.lender).feeBps(), 0);
         assertEq(
             GovToken(deployment.govToken).balanceOf(deployment.timelock), factory.allocationFor(0).immediateAllocation
         );

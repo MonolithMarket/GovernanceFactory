@@ -32,6 +32,7 @@ interface IMonolithLender {
     function pendingOperator() external view returns (address);
     function coin() external view returns (address);
     function vault() external view returns (address);
+    function feeBps() external view returns (uint16);
     function setPendingOperator(address pendingOperator) external;
     function acceptOperator() external;
     function setManager(address manager) external;

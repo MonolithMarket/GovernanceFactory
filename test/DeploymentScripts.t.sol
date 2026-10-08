@@ -80,7 +80,7 @@ contract DeploymentScriptsTest is Test {
         script = new DeployCoinDAOScriptHarness();
     }
 
-    function testDefaultSepoliaConfiguration() public {
+    function testDefaultDeploymentConfigurations() public {
         DeployCoinDAOFactoryScript factoryScript = new DeployCoinDAOFactoryScript();
         assertEq(script.SEPOLIA_CHAIN_ID(), 11_155_111);
         assertEq(script.MONOLITH_FACTORY(), 0x8dDCaeb76a70b860DEaD944970bae0e955c10DA2);
@@ -90,7 +90,8 @@ contract DeploymentScriptsTest is Test {
         assertEq(script.COIN_SYMBOL(), "msUSD");
         assertEq(script.GOV_TOKEN_NAME(), "Monolith Sepolia Governance");
         assertEq(script.GOV_TOKEN_SYMBOL(), "msGOV");
-        assertEq(factoryScript.MONOLITH_FACTORY(), script.MONOLITH_FACTORY());
+        assertEq(factoryScript.MAINNET_CHAIN_ID(), 1);
+        assertEq(factoryScript.MONOLITH_FACTORY(), 0xc68F3e777f28c52FF9DB0276a14F59D96Aa2f931);
 
         CoinDAOFactory.GovLaunchParams memory govParams = script.defaultGovParams();
         IMonolithFactory.DeployParams memory monolithParams = script.defaultMonolithParams();

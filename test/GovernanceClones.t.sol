@@ -172,6 +172,8 @@ contract GovernanceClonesTest is CoinDAOTestBase {
         vm.prank(voter);
         uint256 secondId = second.propose(targets, values, calldatas, "Same proposal");
         assertEq(proposalId, secondId);
+        assertEq(first.latestProposalIds(voter), proposalId);
+        assertEq(second.latestProposalIds(voter), proposalId);
     }
 
     function _matchingActions()

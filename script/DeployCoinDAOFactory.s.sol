@@ -15,11 +15,11 @@ import {StakingRewardsFunder} from "../src/StakingRewardsFunder.sol";
 import {IMonolithFactory} from "../src/interfaces/IMonolith.sol";
 
 contract DeployCoinDAOFactoryScript is Script {
-    uint256 public constant SEPOLIA_CHAIN_ID = 11_155_111;
-    address public constant MONOLITH_FACTORY = 0x365009FA2Ddb17f386E20854E4B281827619E4D2;
+    uint256 public constant MAINNET_CHAIN_ID = 1;
+    address public constant MONOLITH_FACTORY = 0xc68F3e777f28c52FF9DB0276a14F59D96Aa2f931;
 
     function run() external returns (CoinDAOFactory factory) {
-        require(block.chainid == SEPOLIA_CHAIN_ID, "Sepolia only");
+        require(block.chainid == MAINNET_CHAIN_ID, "Mainnet only");
         require(MONOLITH_FACTORY.code.length != 0, "Monolith factory has no code");
 
         uint256 privateKey = vm.envUint("PRIVATE_KEY");

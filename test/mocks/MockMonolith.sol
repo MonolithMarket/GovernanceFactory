@@ -21,12 +21,12 @@ contract MockMonolithLender {
     error ZeroAddress();
     error ForcedFailure();
 
-    constructor(address operator_, address manager_, address coin_, address vault_) {
+    constructor(address operator_, address manager_, address coin_, address vault_, uint256 timeUntilImmutability_) {
         operator = operator_;
         manager = manager_;
         coin = coin_;
         vault = vault_;
-        immutabilityDeadline = block.timestamp;
+        immutabilityDeadline = block.timestamp + timeUntilImmutability_;
     }
 
     function setPendingOperator(address pendingOperator_) external {
@@ -59,7 +59,7 @@ contract MockMonolithLender {
     // Models authorization, validation, and state changes; interest accrual is not simulated by this mock.
     function setLocalReserveFeeBps(uint256 newFeeBps) external {
         if (msg.sender != operator) revert Unauthorized();
-        require(newFeeBps <= 1_000, "Invalid fee");
+        require(newFeeBps <= 5_000, "Invalid fee");
         feeBps = uint16(newFeeBps);
         emit LocalReserveFeeUpdated(newFeeBps);
     }
@@ -93,9 +93,9 @@ contract MockMonolithFactory is IMonolithFactory {
         lastParams = params;
         MockERC20 coinToken = new MockERC20(params.name, params.symbol);
         MockERC20 vaultToken = new MockERC20(string.concat("Staked ", params.name), string.concat("s", params.symbol));
-        MockMonolithLender mockLender =
-            new MockMonolithLender(params.operator, params.manager, address(coinToken), address(vaultToken));
-        mockLender.setImmutabilityDeadline(block.timestamp + params.timeUntilImmutability);
+        MockMonolithLender mockLender = new MockMonolithLender(
+            params.operator, params.manager, address(coinToken), address(vaultToken), params.timeUntilImmutability
+        );
 
         lender = address(mockLender);
         coin = address(coinToken);

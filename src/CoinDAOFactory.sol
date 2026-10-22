@@ -27,6 +27,7 @@ contract CoinDAOFactory {
     uint16 public constant IMMEDIATE_ALLOCATION_WEIGHT = 500;
     uint16 public constant VESTED_TREASURY_WEIGHT = 2_800;
     uint16 public constant DEFAULT_GOV_STAKING_BPS = 10_000;
+    uint16 public constant DEFAULT_LOCAL_RESERVE_FEE_BPS = 5_000;
     uint256 public constant GOV_TOKEN_SUPPLY = FIXED_GOV_TOKEN_SUPPLY;
     uint256 public constant GOVERNOR_PROPOSAL_THRESHOLD = GOV_TOKEN_SUPPLY / 1_000;
     uint256 public constant GOVERNOR_QUORUM_NUMERATOR = 1;
@@ -307,6 +308,8 @@ contract CoinDAOFactory {
         if (deployment.lender == address(0) || deployment.coin == address(0) || deployment.vault == address(0)) {
             revert ZeroAddress();
         }
+        // Fresh markets accrue revenue from launch; existing-market attachments preserve their configured fee.
+        IMonolithLender(deployment.lender).setLocalReserveFeeBps(DEFAULT_LOCAL_RESERVE_FEE_BPS);
 
         deployment = _deployCoinDAO(deployment, govParams, key, msg.sender, userSalt);
     }

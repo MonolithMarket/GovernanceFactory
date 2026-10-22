@@ -35,7 +35,10 @@ contract CoinDAOGovernor is
     uint48 public constant DEFAULT_VOTING_DELAY_BLOCKS = 7_200;
     uint32 public constant DEFAULT_VOTING_PERIOD_BLOCKS = 36_000;
 
+    mapping(address proposer => uint256 proposalId) public latestProposalIds;
+
     error ERC5805FutureLookup(uint256 timepoint, uint48 clock);
+    error GovernorProposerHasLiveProposal(address proposer, uint256 proposalId);
 
     constructor() {
         _disableInitializers();
@@ -105,6 +108,38 @@ contract CoinDAOGovernor is
 
     function quorumDenominator() public pure override returns (uint256) {
         return 1_000;
+    }
+
+    function _propose(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        string memory description,
+        address proposer
+    ) internal override returns (uint256 proposalId) {
+        uint256 latestProposalId = latestProposalIds[proposer];
+        if (latestProposalId != 0) {
+            ProposalState latestState = state(latestProposalId);
+            if (latestState == ProposalState.Pending || latestState == ProposalState.Active) {
+                revert GovernorProposerHasLiveProposal(proposer, latestProposalId);
+            }
+        }
+
+        proposalId = super._propose(targets, values, calldatas, description, proposer);
+        latestProposalIds[proposer] = proposalId;
+    }
+
+    function _validateCancel(uint256 proposalId, address caller) internal view override returns (bool) {
+        ProposalState currentState = state(proposalId);
+        if (
+            currentState == ProposalState.Canceled || currentState == ProposalState.Expired
+                || currentState == ProposalState.Executed
+        ) {
+            return false;
+        }
+
+        address proposer = proposalProposer(proposalId);
+        return caller == proposer || getVotes(proposer, clock() - 1) < proposalThreshold();
     }
 
     function _queueOperations(

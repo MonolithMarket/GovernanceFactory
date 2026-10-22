@@ -14,12 +14,12 @@ contract MockMonolithLender {
     uint256 public immutabilityDeadline;
     bool public failOperatorNomination;
 
+    event LocalReserveFeeUpdated(uint256 feeBps);
+    event ImmutabilityEnabled(uint256 timestamp);
+
     error Unauthorized();
     error ZeroAddress();
     error ForcedFailure();
-
-    event LocalReserveFeeUpdated(uint256 feeBps);
-    event ImmutabilityEnabled(uint256 timestamp);
 
     constructor(address operator_, address manager_, address coin_, address vault_, uint256 timeUntilImmutability_) {
         operator = operator_;
@@ -47,11 +47,21 @@ contract MockMonolithLender {
         manager = manager_;
     }
 
-    function setLocalReserveFeeBps(uint256 feeBps_) external {
+    function setAccruedLocalReserves(uint256 amount) external {
+        accruedLocalReserves = amount;
+    }
+
+    // Test setup only. The production Lender initializes this from its deployment parameters.
+    function setImmutabilityDeadline(uint256 deadline) external {
+        immutabilityDeadline = deadline;
+    }
+
+    // Models authorization, validation, and state changes; interest accrual is not simulated by this mock.
+    function setLocalReserveFeeBps(uint256 newFeeBps) external {
         if (msg.sender != operator) revert Unauthorized();
-        require(feeBps_ <= 5_000, "Invalid fee");
-        feeBps = uint16(feeBps_);
-        emit LocalReserveFeeUpdated(feeBps_);
+        require(newFeeBps <= 5_000, "Invalid fee");
+        feeBps = uint16(newFeeBps);
+        emit LocalReserveFeeUpdated(newFeeBps);
     }
 
     function enableImmutabilityNow() external {
@@ -59,10 +69,6 @@ contract MockMonolithLender {
         require(block.timestamp < immutabilityDeadline, "Deadline passed");
         immutabilityDeadline = block.timestamp;
         emit ImmutabilityEnabled(block.timestamp);
-    }
-
-    function setAccruedLocalReserves(uint256 amount) external {
-        accruedLocalReserves = amount;
     }
 
     function setFailOperatorNomination(bool fail) external {

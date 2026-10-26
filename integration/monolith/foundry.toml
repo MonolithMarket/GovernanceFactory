@@ -1,0 +1,23 @@
+[profile.default]
+src = "../../lib/monolith/src"
+test = "test"
+out = "out"
+libs = ["../../lib"]
+auto_detect_remappings = false
+solc_version = "0.8.24"
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+dynamic_test_linking = false
+# Emit artifacts for the real Vault used by the native governance helper tests.
+build_info = true
+fs_permissions = [{ access = "read", path = "../../out" }]
+remappings = [
+  "monolith/=../../lib/monolith/src/",
+  "periphery/=../../src/periphery/",
+  "../../lib/monolith/:src/=../../lib/monolith/src/",
+  "lib/solmate/=../../lib/monolith/lib/solmate/",
+  "forge-std/=../../lib/forge-std/src/",
+  "@openzeppelin/contracts/=../../lib/openzeppelin-contracts/contracts/",
+  "@openzeppelin/contracts-upgradeable/=../../lib/openzeppelin-contracts-upgradeable/contracts/"
+]
